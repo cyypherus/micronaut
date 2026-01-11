@@ -4,7 +4,7 @@ use winnow::error::ModalResult;
 use winnow::stream::Stateful;
 use winnow::token::{take, take_while};
 
-use crate::micron::ast::*;
+use crate::micronaut::ast::*;
 
 type Stream<'a> = Stateful<&'a str, ParseState>;
 
@@ -397,7 +397,7 @@ fn parse_color<'a>(input: &mut Stream<'a>) -> ModalResult<Color> {
     Ok(Color { r, g, b })
 }
 
-fn parse_link<'a>(input: &mut Stream<'a>) -> ModalResult<Link> {
+fn parse_link<'a>(input: &mut Stream<'a>) -> ModalResult<LinkElement> {
     let label: &str = take_while(0.., |c| c != '`').parse_next(input)?;
     let _ = '`'.parse_next(input)?;
     let url: &str = take_while(0.., |c| c != '`' && c != ']').parse_next(input)?;
@@ -410,7 +410,7 @@ fn parse_link<'a>(input: &mut Stream<'a>) -> ModalResult<Link> {
         label.to_string()
     };
 
-    Ok(Link {
+    Ok(LinkElement {
         label: effective_label,
         url: url.to_string(),
         fields: fields

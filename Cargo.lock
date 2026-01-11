@@ -571,7 +571,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "micron"
+name = "micronaut"
 version = "0.1.0"
 dependencies = [
  "crossterm",
