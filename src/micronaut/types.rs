@@ -19,7 +19,7 @@ pub struct Hitbox {
 #[derive(Debug, Clone)]
 pub enum HitboxTarget {
     Link { url: String, fields: Vec<String> },
-    TextField { name: String, masked: bool },
+    TextField { name: String, masked: bool, default: String },
     Checkbox { name: String },
     Radio { name: String, value: String },
 }

@@ -180,6 +180,7 @@ fn render_normal_with_hitboxes(
                     FieldKind::Text => HitboxTarget::TextField {
                         name: field.name.clone(),
                         masked: field.masked,
+                        default: field.default.clone(),
                     },
                     FieldKind::Checkbox { .. } => HitboxTarget::Checkbox {
                         name: field.name.clone(),

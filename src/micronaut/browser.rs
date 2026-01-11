@@ -124,8 +124,8 @@ impl<R: Renderer> Browser<R> {
 
         for hitbox in &self.hitboxes {
             match &hitbox.target {
-                HitboxTarget::TextField { name, .. } => {
-                    self.field_values.entry(name.clone()).or_default();
+                HitboxTarget::TextField { name, default, .. } => {
+                    self.field_values.entry(name.clone()).or_insert_with(|| default.clone());
                 }
                 HitboxTarget::Checkbox { name } => {
                     self.checkbox_states.entry(name.clone()).or_insert(false);
@@ -292,6 +292,11 @@ impl<R: Renderer> Browser<R> {
                 return self.interact();
             }
         }
+        
+        if self.editing_field.is_some() {
+            self.editing_field = None;
+            self.render_dirty = true;
+        }
         None
     }
 
@@ -426,6 +431,7 @@ mod tests {
                                 FieldKind::Text => HitboxTarget::TextField {
                                     name: field.name.clone(),
                                     masked: field.masked,
+                                    default: field.default.clone(),
                                 },
                                 FieldKind::Checkbox { .. } => {
                                     HitboxTarget::Checkbox {
@@ -545,7 +551,7 @@ mod tests {
     #[test]
     fn text_input() {
         let mut browser = Browser::new(NullRenderer);
-        browser.set_content("/test", "`<|name`Enter name>");
+        browser.set_content("/test", "`<|name`>");
         
         browser.interact();
         assert!(browser.is_editing());
@@ -556,6 +562,18 @@ mod tests {
         
         browser.input_backspace();
         assert_eq!(form_state(&mut browser).fields.get("name"), Some(&"H".to_string()));
+    }
+
+    #[test]
+    fn text_field_with_default() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`<|name`John>");
+        
+        assert_eq!(form_state(&mut browser).fields.get("name"), Some(&"John".to_string()));
+        
+        browser.interact();
+        browser.input_char('!');
+        assert_eq!(form_state(&mut browser).fields.get("name"), Some(&"John!".to_string()));
     }
 
     #[test]
@@ -797,6 +815,18 @@ This is the report content."#;
         
         let result = browser.click(100, 100);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn click_outside_defocuses_field() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`<|name`Enter name>");
+        
+        browser.interact();
+        assert!(browser.is_editing());
+        
+        browser.click(100, 100);
+        assert!(!browser.is_editing());
     }
 
     #[test]
