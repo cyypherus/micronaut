@@ -1,22 +1,32 @@
 use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
 use ratatui::text::{Line as RatLine, Span, Text};
+use std::collections::HashMap;
 
 use crate::micron::ast::*;
 
 const SECTION_INDENT: u16 = 2;
 
-pub struct RenderConfig {
+pub struct RenderConfig<'a> {
     pub width: u16,
     pub default_field_width: u16,
+    pub form_state: Option<&'a FormState>,
 }
 
-impl Default for RenderConfig {
+impl Default for RenderConfig<'_> {
     fn default() -> Self {
         Self {
             width: 80,
             default_field_width: 24,
+            form_state: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FormState {
+    pub fields: HashMap<String, String>,
+    pub checkboxes: HashMap<String, bool>,
+    pub radios: HashMap<String, String>,
 }
 
 struct HeadingStyle {
@@ -162,10 +172,16 @@ fn render_field(field: &Field, config: &RenderConfig) -> Span<'static> {
 
     match &field.kind {
         FieldKind::Text => {
+            let value = config
+                .form_state
+                .and_then(|s| s.fields.get(&field.name))
+                .map(|s| s.as_str())
+                .unwrap_or(&field.default);
+
             let display = if field.masked {
-                "*".repeat(field.default.len().min(width))
+                "*".repeat(value.len().min(width))
             } else {
-                let mut s = field.default.clone();
+                let mut s = value.to_string();
                 s.truncate(width);
                 s
             };
@@ -173,11 +189,23 @@ fn render_field(field: &Field, config: &RenderConfig) -> Span<'static> {
             Span::styled(padded, style)
         }
         FieldKind::Checkbox { checked } => {
-            let display = if *checked { "[X]" } else { "[ ]" };
+            let is_checked = config
+                .form_state
+                .and_then(|s| s.checkboxes.get(&field.name))
+                .copied()
+                .unwrap_or(*checked);
+
+            let display = if is_checked { "[X]" } else { "[ ]" };
             Span::styled(display.to_string(), style)
         }
-        FieldKind::Radio { checked, .. } => {
-            let display = if *checked { "(X)" } else { "( )" };
+        FieldKind::Radio { value, checked } => {
+            let is_checked = config
+                .form_state
+                .and_then(|s| s.radios.get(&field.name))
+                .map(|selected| selected == value)
+                .unwrap_or(*checked);
+
+            let display = if is_checked { "(X)" } else { "( )" };
             Span::styled(display.to_string(), style)
         }
     }
