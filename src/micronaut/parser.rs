@@ -398,11 +398,17 @@ fn parse_color<'a>(input: &mut Stream<'a>) -> ModalResult<Color> {
 }
 
 fn parse_link<'a>(input: &mut Stream<'a>) -> ModalResult<LinkElement> {
-    let label: &str = take_while(0.., |c| c != '`').parse_next(input)?;
-    let _ = '`'.parse_next(input)?;
-    let url: &str = take_while(0.., |c| c != '`' && c != ']').parse_next(input)?;
-    let fields = opt(preceded('`', take_while(0.., |c| c != ']'))).parse_next(input)?;
+    let link_data: &str = take_while(0.., |c| c != ']').parse_next(input)?;
     let _ = ']'.parse_next(input)?;
+
+    let components: Vec<&str> = link_data.split('`').collect();
+
+    let (label, url, fields) = match components.len() {
+        1 => ("", components[0], ""),
+        2 => (components[0], components[1], ""),
+        3 => (components[0], components[1], components[2]),
+        _ => ("", "", ""),
+    };
 
     let effective_label = if label.is_empty() {
         url.to_string()
@@ -413,9 +419,11 @@ fn parse_link<'a>(input: &mut Stream<'a>) -> ModalResult<LinkElement> {
     Ok(LinkElement {
         label: effective_label,
         url: url.to_string(),
-        fields: fields
-            .map(|f: &str| f.split('|').map(String::from).collect())
-            .unwrap_or_default(),
+        fields: if fields.is_empty() {
+            vec![]
+        } else {
+            fields.split('|').map(String::from).collect()
+        },
         style: input.state.current_style(),
     })
 }
@@ -1581,4 +1589,70 @@ fn test_styled_link() {
         assert_eq!(l.label, "Home");
         assert_eq!(l.url, ":/page/index.mu");
     }
+}
+
+#[test]
+fn test_file_list_with_color_underline_link() {
+    // First test a simpler case: just color and link
+    let doc = parse(r#"`F0f0`[Test`/path]"#);
+    println!("Simple test - Elements: {:?}", doc.lines[0].elements);
+    assert!(
+        doc.lines[0]
+            .elements
+            .iter()
+            .any(|e| matches!(e, Element::Link(_))),
+        "Simple case should have link"
+    );
+
+    // Test with underline
+    let doc = parse(r#"`_`[Test`/path]`_"#);
+    println!("Underline test - Elements: {:?}", doc.lines[0].elements);
+    assert!(
+        doc.lines[0]
+            .elements
+            .iter()
+            .any(|e| matches!(e, Element::Link(_))),
+        "Underline case should have link"
+    );
+
+    // Test link with no label (URL becomes label) - no backtick needed per reference impl
+    let doc = parse(r#"`[:/file/test.mp3]"#);
+    println!("No-label test - Elements: {:?}", doc.lines[0].elements);
+    assert!(
+        doc.lines[0]
+            .elements
+            .iter()
+            .any(|e| matches!(e, Element::Link(_))),
+        "No-label case should have link"
+    );
+
+    // Format: " -  `F0f0`_`[:/file/Baby_Got_Back.mp3]`_`f (11M)"
+    // This is a list item with: fg color, underline start, link (no label), underline end, fg reset, text
+    let doc = parse(r#" -  `F0f0`_`[:/file/Baby_Got_Back.mp3]`_`f (11M)"#);
+
+    println!("Full test - Parsed {} lines", doc.lines.len());
+    for (i, line) in doc.lines.iter().enumerate() {
+        println!("Line {}: {:?}", i, line);
+        for (j, elem) in line.elements.iter().enumerate() {
+            println!("  Element {}: {:?}", j, elem);
+        }
+    }
+
+    assert_eq!(doc.lines.len(), 1);
+    let has_link = doc.lines[0]
+        .elements
+        .iter()
+        .any(|e| matches!(e, Element::Link(_)));
+    assert!(has_link, "Should have a link element");
+
+    // Find the link element and verify its URL
+    let link = doc.lines[0]
+        .elements
+        .iter()
+        .find_map(|e| match e {
+            Element::Link(l) => Some(l),
+            _ => None,
+        })
+        .expect("Should have a link");
+    assert_eq!(link.url, ":/file/Baby_Got_Back.mp3");
 }

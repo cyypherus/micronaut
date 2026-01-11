@@ -34,13 +34,14 @@
 ## Links
 
 ```
+`[url]
 `[label`url]
 `[label`url`field1|field2]
 ```
 
 Components:
-- `label` — Display text (if empty, shows url)
-- `url` — Link target
+- `url` — Link target (if no label, url is used as display text)
+- `label` — Display text (optional)
 - `fields` — Optional pipe-separated field names for forms
 
 ## Input Fields
