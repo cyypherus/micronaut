@@ -27,6 +27,7 @@ pub struct FormState {
     pub fields: HashMap<String, String>,
     pub checkboxes: HashMap<String, bool>,
     pub radios: HashMap<String, String>,
+    pub editing_field: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +40,7 @@ pub struct Hitbox {
 
 #[derive(Debug, Clone)]
 pub enum HitboxTarget {
-    Link { url: String },
+    Link { url: String, fields: Vec<String> },
     TextField { name: String, masked: bool },
     Checkbox { name: String },
     Radio { name: String, value: String },
@@ -203,6 +204,7 @@ fn render_normal_with_hitboxes(
                     style,
                     hitbox: Some(HitboxTarget::Link {
                         url: link.url.clone(),
+                        fields: link.fields.clone(),
                     }),
                 });
             }
@@ -293,7 +295,18 @@ fn render_normal_with_hitboxes(
 
 fn render_field(field: &Field, config: &RenderConfig) -> Span<'static> {
     let width = field.width.unwrap_or(config.default_field_width) as usize;
-    let style = RatStyle::default().fg(RatColor::Black).bg(RatColor::White);
+
+    let is_editing = config
+        .form_state
+        .and_then(|s| s.editing_field.as_ref())
+        .map(|name| name == &field.name)
+        .unwrap_or(false);
+
+    let style = if is_editing {
+        RatStyle::default().fg(RatColor::Black).bg(RatColor::Yellow)
+    } else {
+        RatStyle::default().fg(RatColor::Black).bg(RatColor::White)
+    };
 
     match &field.kind {
         FieldKind::Text => {
@@ -310,7 +323,17 @@ fn render_field(field: &Field, config: &RenderConfig) -> Span<'static> {
                 s.truncate(width);
                 s
             };
-            let padded = format!("{:<width$}", display, width = width);
+
+            let padded = if is_editing {
+                let cursor_pos = display.len();
+                if cursor_pos < width {
+                    format!("{}_{}", display, " ".repeat(width - cursor_pos - 1))
+                } else {
+                    format!("{:<width$}", display, width = width)
+                }
+            } else {
+                format!("{:<width$}", display, width = width)
+            };
             Span::styled(padded, style)
         }
         FieldKind::Checkbox { checked } => {
@@ -458,10 +481,54 @@ mod tests {
         let config = RenderConfig::default();
         let output = render_with_hitboxes(&doc, &config);
         assert_eq!(output.hitboxes.len(), 1);
-        if let HitboxTarget::Link { url } = &output.hitboxes[0].target {
+        if let HitboxTarget::Link { url, fields } = &output.hitboxes[0].target {
             assert_eq!(url, ":/page/bible.mu");
+            assert_eq!(fields, &["single_verse=true", "book=John"]);
         } else {
             panic!("Expected Link hitbox");
         }
+    }
+
+    #[test]
+    fn test_hitbox_positions_simple() {
+        let doc = parse("Hello `[Link`http://x]");
+        let config = RenderConfig {
+            width: 80,
+            ..Default::default()
+        };
+        let output = render_with_hitboxes(&doc, &config);
+        assert_eq!(output.hitboxes.len(), 1);
+        let hb = &output.hitboxes[0];
+        assert_eq!(hb.line, 0);
+        assert_eq!(hb.col_start, 6); // "Hello " is 6 chars
+        assert_eq!(hb.col_end, 10); // "Link" is 4 chars
+    }
+
+    #[test]
+    fn test_hitbox_wrapped_link() {
+        // Width 20, link "Click here now" = 14 chars
+        // "Some text " = 10 chars, leaves 10 for content
+        // Link will wrap: "Click here" (10) on line 0, " now" (4) on line 1
+        let doc = parse("Some text `[Click here now`http://x]");
+        let config = RenderConfig {
+            width: 20,
+            ..Default::default()
+        };
+        let output = render_with_hitboxes(&doc, &config);
+
+        // Should have 2 hitboxes for the wrapped link
+        assert_eq!(
+            output.hitboxes.len(),
+            2,
+            "Expected 2 hitboxes for wrapped link"
+        );
+
+        // First part on line 0
+        assert_eq!(output.hitboxes[0].line, 0);
+        assert_eq!(output.hitboxes[0].col_start, 10); // after "Some text "
+
+        // Second part on line 1
+        assert_eq!(output.hitboxes[1].line, 1);
+        assert_eq!(output.hitboxes[1].col_start, 0); // starts at beginning
     }
 }
