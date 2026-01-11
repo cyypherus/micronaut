@@ -1553,4 +1553,32 @@ This is `!NomadNet`!.
             assert!(t.style.bg.is_none());
         }
     }
+
+    #[test]
+    fn test_link_colon_path() {
+        let doc = parse("`[Home`:/page/index.mu]");
+        if let Element::Link(l) = &doc.lines[0].elements[0] {
+            assert_eq!(l.label, "Home");
+            assert_eq!(l.url, ":/page/index.mu");
+        } else {
+            panic!("Expected Link");
+        }
+    }
+}
+
+#[test]
+fn test_styled_link() {
+    // This is the format from the actual page: `!`[Home`:/page/index.mu]`!
+    let doc = parse(r#"`!`[Home`:/page/index.mu]`!"#);
+    println!("Elements: {:?}", doc.lines[0].elements);
+    assert!(!doc.lines[0].elements.is_empty());
+    let has_link = doc.lines[0]
+        .elements
+        .iter()
+        .any(|e| matches!(e, Element::Link(_)));
+    assert!(has_link, "Should have a link element");
+    if let Element::Link(l) = &doc.lines[0].elements[0] {
+        assert_eq!(l.label, "Home");
+        assert_eq!(l.url, ":/page/index.mu");
+    }
 }

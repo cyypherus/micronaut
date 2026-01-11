@@ -29,6 +29,27 @@ pub struct FormState {
     pub radios: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Hitbox {
+    pub line: usize,
+    pub col_start: usize,
+    pub col_end: usize,
+    pub target: HitboxTarget,
+}
+
+#[derive(Debug, Clone)]
+pub enum HitboxTarget {
+    Link { url: String },
+    TextField { name: String, masked: bool },
+    Checkbox { name: String },
+    Radio { name: String, value: String },
+}
+
+pub struct RenderOutput {
+    pub text: Text<'static>,
+    pub hitboxes: Vec<Hitbox>,
+}
+
 struct HeadingStyle {
     fg: RatColor,
     bg: RatColor,
@@ -78,20 +99,36 @@ fn convert_style(style: &Style) -> RatStyle {
 }
 
 pub fn render(doc: &Document, config: &RenderConfig) -> Text<'static> {
-    let lines: Vec<RatLine> = doc
-        .lines
-        .iter()
-        .flat_map(|line| render_line(line, config))
-        .collect();
-    Text::from(lines)
+    render_with_hitboxes(doc, config).text
 }
 
-fn render_line(line: &Line, config: &RenderConfig) -> Vec<RatLine<'static>> {
+pub fn render_with_hitboxes(doc: &Document, config: &RenderConfig) -> RenderOutput {
+    let mut lines: Vec<RatLine> = Vec::new();
+    let mut hitboxes: Vec<Hitbox> = Vec::new();
+
+    for line in &doc.lines {
+        let row = lines.len();
+        let (rendered, mut hits) = render_line_with_hitboxes(line, row, config);
+        lines.extend(rendered);
+        hitboxes.append(&mut hits);
+    }
+
+    RenderOutput {
+        text: Text::from(lines),
+        hitboxes,
+    }
+}
+
+fn render_line_with_hitboxes(
+    line: &Line,
+    row: usize,
+    config: &RenderConfig,
+) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
     match line.kind {
-        LineKind::Comment => vec![],
-        LineKind::Divider(ch) => render_divider(ch, line.indent_depth, config),
-        LineKind::Heading(level) => render_heading(line, level, config),
-        LineKind::Normal => render_normal(line, config),
+        LineKind::Comment => (vec![], vec![]),
+        LineKind::Divider(ch) => (render_divider(ch, line.indent_depth, config), vec![]),
+        LineKind::Heading(level) => (render_heading(line, level, config), vec![]),
+        LineKind::Normal => render_normal_with_hitboxes(line, row, config),
     }
 }
 
@@ -128,42 +165,130 @@ fn render_heading(line: &Line, level: u8, config: &RenderConfig) -> Vec<RatLine<
     vec![RatLine::from(spans)]
 }
 
-fn render_normal(line: &Line, config: &RenderConfig) -> Vec<RatLine<'static>> {
+struct WrappedSpan {
+    text: String,
+    style: RatStyle,
+    hitbox: Option<HitboxTarget>,
+}
+
+fn render_normal_with_hitboxes(
+    line: &Line,
+    row: usize,
+    config: &RenderConfig,
+) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
     let indent = line.indent_depth.saturating_sub(1) as u16 * SECTION_INDENT;
+    let width = config.width as usize;
+    let content_width = width.saturating_sub(indent as usize);
 
-    let mut spans: Vec<Span<'static>> = Vec::new();
-
-    if indent > 0 {
-        spans.push(Span::raw(" ".repeat(indent as usize)));
+    if content_width == 0 {
+        return (vec![RatLine::from("")], vec![]);
     }
+
+    let mut wrapped_spans: Vec<WrappedSpan> = Vec::new();
 
     for element in &line.elements {
         match element {
             Element::Text(styled) => {
-                spans.push(Span::styled(
-                    styled.text.clone(),
-                    convert_style(&styled.style),
-                ));
+                wrapped_spans.push(WrappedSpan {
+                    text: styled.text.clone(),
+                    style: convert_style(&styled.style),
+                    hitbox: None,
+                });
             }
             Element::Link(link) => {
                 let mut style = convert_style(&link.style);
                 style = style.add_modifier(Modifier::UNDERLINED);
-                spans.push(Span::styled(link.label.clone(), style));
+                wrapped_spans.push(WrappedSpan {
+                    text: link.label.clone(),
+                    style,
+                    hitbox: Some(HitboxTarget::Link {
+                        url: link.url.clone(),
+                    }),
+                });
             }
             Element::Field(field) => {
-                spans.push(render_field(field, config));
+                let span = render_field(field, config);
+                let target = match &field.kind {
+                    FieldKind::Text => HitboxTarget::TextField {
+                        name: field.name.clone(),
+                        masked: field.masked,
+                    },
+                    FieldKind::Checkbox { .. } => HitboxTarget::Checkbox {
+                        name: field.name.clone(),
+                    },
+                    FieldKind::Radio { value, .. } => HitboxTarget::Radio {
+                        name: field.name.clone(),
+                        value: value.clone(),
+                    },
+                };
+                wrapped_spans.push(WrappedSpan {
+                    text: span.content.to_string(),
+                    style: span.style,
+                    hitbox: Some(target),
+                });
             }
             Element::Partial(partial) => {
-                spans.push(Span::raw(format!("[partial:{}]", partial.url)));
+                wrapped_spans.push(WrappedSpan {
+                    text: format!("[partial:{}]", partial.url),
+                    style: RatStyle::default(),
+                    hitbox: None,
+                });
             }
         }
     }
 
-    if spans.is_empty() || (spans.len() == 1 && indent > 0) {
-        return vec![RatLine::from(spans)];
+    let mut lines: Vec<RatLine<'static>> = Vec::new();
+    let mut hitboxes: Vec<Hitbox> = Vec::new();
+    let mut current_line_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_col = 0usize;
+    let mut current_row = row;
+
+    if indent > 0 {
+        current_line_spans.push(Span::raw(" ".repeat(indent as usize)));
     }
 
-    vec![RatLine::from(spans).alignment(convert_alignment(line.alignment))]
+    for ws in wrapped_spans {
+        let chars: Vec<char> = ws.text.chars().collect();
+        let mut char_idx = 0;
+
+        while char_idx < chars.len() {
+            let remaining_width = content_width.saturating_sub(current_col);
+
+            if remaining_width == 0 {
+                lines.push(RatLine::from(std::mem::take(&mut current_line_spans)));
+                current_row += 1;
+                current_col = 0;
+                if indent > 0 {
+                    current_line_spans.push(Span::raw(" ".repeat(indent as usize)));
+                }
+                continue;
+            }
+
+            let chars_left = chars.len() - char_idx;
+            let take_count = std::cmp::min(remaining_width, chars_left);
+            let chunk: String = chars[char_idx..char_idx + take_count].iter().collect();
+            let chunk_len = chunk.chars().count();
+
+            if let Some(ref target) = ws.hitbox {
+                hitboxes.push(Hitbox {
+                    line: current_row,
+                    col_start: current_col + indent as usize,
+                    col_end: current_col + indent as usize + chunk_len,
+                    target: target.clone(),
+                });
+            }
+
+            current_line_spans.push(Span::styled(chunk, ws.style));
+            current_col += chunk_len;
+            char_idx += take_count;
+        }
+    }
+
+    if !current_line_spans.is_empty() || (current_line_spans.is_empty() && lines.is_empty()) {
+        lines.push(RatLine::from(current_line_spans));
+    }
+
+    (lines, hitboxes)
 }
 
 fn render_field(field: &Field, config: &RenderConfig) -> Span<'static> {
@@ -325,5 +450,18 @@ mod tests {
         let config = RenderConfig::default();
         let text = render(&doc, &config);
         assert!(text.lines.len() >= 1);
+    }
+
+    #[test]
+    fn test_hitboxes_link_with_fields() {
+        let doc = parse("`[John 3:17`:/page/bible.mu`single_verse=true|book=John]");
+        let config = RenderConfig::default();
+        let output = render_with_hitboxes(&doc, &config);
+        assert_eq!(output.hitboxes.len(), 1);
+        if let HitboxTarget::Link { url } = &output.hitboxes[0].target {
+            assert_eq!(url, ":/page/bible.mu");
+        } else {
+            panic!("Expected Link hitbox");
+        }
     }
 }
