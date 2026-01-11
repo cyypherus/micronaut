@@ -580,4 +580,248 @@ mod tests {
         assert_eq!(link.form_data.get("msg"), Some(&"B".to_string()));
         assert_eq!(link.form_data.get("action"), Some(&"go".to_string()));
     }
+
+    #[test]
+    fn select_next_prev_cycles() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`[A`/a]\n`[B`/b]\n`[C`/c]");
+        
+        assert_eq!(browser.selected_link(), Some("/a"));
+        browser.select_next();
+        assert_eq!(browser.selected_link(), Some("/b"));
+        browser.select_next();
+        assert_eq!(browser.selected_link(), Some("/c"));
+        browser.select_next();
+        assert_eq!(browser.selected_link(), Some("/a"));
+        
+        browser.select_prev();
+        assert_eq!(browser.selected_link(), Some("/c"));
+    }
+
+    #[test]
+    fn radio_button_selection() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`<^|color|red`Red>\n`<^|color|blue`Blue>\n`<^|color|green`Green>");
+        
+        assert_eq!(form_state(&mut browser).radios.get("color"), Some(&"red".to_string()));
+        
+        browser.select_next();
+        browser.interact();
+        assert_eq!(form_state(&mut browser).radios.get("color"), Some(&"blue".to_string()));
+        
+        browser.select_next();
+        browser.interact();
+        assert_eq!(form_state(&mut browser).radios.get("color"), Some(&"green".to_string()));
+    }
+
+    #[test]
+    fn resize_triggers_rebuild() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "Hello world");
+        browser.render();
+        
+        browser.resize(40, 20);
+        assert!(browser.render().is_some());
+    }
+
+    #[test]
+    fn navigation_clears_form_state() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/page1", "`<|name`>");
+        
+        browser.interact();
+        browser.input_char('X');
+        browser.cancel_edit();
+        assert_eq!(form_state(&mut browser).fields.get("name"), Some(&"X".to_string()));
+        
+        browser.set_content("/page2", "`<|name`>");
+        assert_eq!(form_state(&mut browser).fields.get("name"), Some(&"".to_string()));
+    }
+
+    #[test]
+    fn back_preserves_scroll_position() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.resize(80, 10);
+        browser.set_content("/page1", "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no");
+        browser.scroll_to(5);
+        
+        browser.set_content("/page2", "Page 2");
+        assert_eq!(browser.scroll(), 0);
+        
+        browser.back();
+        assert_eq!(browser.scroll(), 5);
+    }
+
+    #[test]
+    fn directory_navigation_simulation() {
+        let mut browser = Browser::new(NullRenderer);
+        
+        let index = r#">Welcome
+`[Documents`/docs]
+`[Settings`/settings]
+`[About`/about]"#;
+        
+        let docs = r#">Documents
+`[Back`/]
+-
+`[Report.pdf`/docs/report]
+`[Notes.txt`/docs/notes]"#;
+        
+        let report = r#">Report
+`[Back to Documents`/docs]
+-
+This is the report content."#;
+        
+        browser.set_content("/", index);
+        assert_eq!(browser.url(), Some("/"));
+        assert_eq!(browser.selected_link(), Some("/docs"));
+        
+        let link = browser.interact().unwrap();
+        assert_eq!(link.url, "/docs");
+        browser.set_content("/docs", docs);
+        assert_eq!(browser.url(), Some("/docs"));
+        
+        browser.select_next();
+        assert_eq!(browser.selected_link(), Some("/docs/report"));
+        
+        let link = browser.interact().unwrap();
+        browser.set_content(&link.url, report);
+        assert_eq!(browser.url(), Some("/docs/report"));
+        
+        assert!(browser.can_go_back());
+        browser.back();
+        assert_eq!(browser.url(), Some("/docs"));
+        
+        browser.back();
+        assert_eq!(browser.url(), Some("/"));
+        
+        browser.forward();
+        assert_eq!(browser.url(), Some("/docs"));
+    }
+
+    #[test]
+    fn login_form_simulation() {
+        let mut browser = Browser::new(NullRenderer);
+        
+        let login_page = r#">Login
+`<|username`>
+`<!|password`>
+`[Login`/auth`username|password]"#;
+        
+        browser.set_content("/login", login_page);
+        
+        browser.interact();
+        for c in "alice".chars() {
+            browser.input_char(c);
+        }
+        browser.cancel_edit();
+        
+        browser.select_next();
+        browser.interact();
+        for c in "secret123".chars() {
+            browser.input_char(c);
+        }
+        browser.cancel_edit();
+        
+        browser.select_next();
+        let link = browser.interact().unwrap();
+        
+        assert_eq!(link.url, "/auth");
+        assert_eq!(link.form_data.get("username"), Some(&"alice".to_string()));
+        assert_eq!(link.form_data.get("password"), Some(&"secret123".to_string()));
+    }
+
+    #[test]
+    fn search_with_wildcard_fields() {
+        let mut browser = Browser::new(NullRenderer);
+        
+        let search_page = r#"`<|query`>
+`<?|exact|1`Exact match>
+`[Search`/search`*]"#;
+        
+        browser.set_content("/search", search_page);
+        
+        browser.interact();
+        for c in "rust".chars() {
+            browser.input_char(c);
+        }
+        browser.cancel_edit();
+        
+        browser.select_next();
+        browser.interact();
+        
+        browser.select_next();
+        let link = browser.interact().unwrap();
+        
+        assert_eq!(link.url, "/search");
+        assert_eq!(link.form_data.get("query"), Some(&"rust".to_string()));
+        assert_eq!(link.form_data.get("exact"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn empty_content_handling() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/empty", "");
+        
+        assert!(browser.has_content());
+        assert!(browser.render().is_some());
+        assert!(browser.selected_link().is_none());
+        
+        browser.select_next();
+        browser.select_prev();
+        assert!(browser.interact().is_none());
+    }
+
+    #[test]
+    fn input_ignored_when_not_editing() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`[Link`/target]");
+        
+        assert_eq!(browser.input_char('x'), InputResult::Ignored);
+        assert_eq!(browser.input_backspace(), InputResult::Ignored);
+    }
+
+    #[test]
+    fn cancel_edit_when_not_editing() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`<|name`>");
+        
+        browser.cancel_edit();
+        assert!(!browser.is_editing());
+    }
+
+    #[test]
+    fn click_outside_hitbox() {
+        let mut browser = Browser::new(NullRenderer);
+        browser.set_content("/test", "`[Link`/target]");
+        
+        let result = browser.click(100, 100);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn multiple_back_forward() {
+        let mut browser = Browser::new(NullRenderer);
+        
+        browser.set_content("/a", "A");
+        browser.set_content("/b", "B");
+        browser.set_content("/c", "C");
+        browser.set_content("/d", "D");
+        
+        assert_eq!(browser.url(), Some("/d"));
+        
+        browser.back();
+        browser.back();
+        assert_eq!(browser.url(), Some("/b"));
+        
+        browser.forward();
+        assert_eq!(browser.url(), Some("/c"));
+        
+        browser.set_content("/e", "E");
+        assert!(!browser.can_go_forward());
+        assert_eq!(browser.url(), Some("/e"));
+        
+        browser.back();
+        assert_eq!(browser.url(), Some("/c"));
+    }
 }
