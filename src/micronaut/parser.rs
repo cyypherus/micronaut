@@ -800,10 +800,10 @@ mod tests {
     #[test]
     fn test_field_radio_checked() {
         let doc = parse("`<^|color|blue|*`Blue>");
-        if let Element::Field(f) = &doc.lines[0].elements[0] {
-            if let FieldKind::Radio { checked, .. } = &f.kind {
-                assert!(checked);
-            }
+        if let Element::Field(f) = &doc.lines[0].elements[0]
+            && let FieldKind::Radio { checked, .. } = &f.kind
+        {
+            assert!(checked);
         }
     }
 
@@ -1257,17 +1257,17 @@ This is `!NomadNet`!.
     #[test]
     fn test_radio_group() {
         let doc = parse("`<^|size|s`Small> `<^|size|m`Medium> `<^|size|l|*`Large>");
-        if let Element::Field(f) = &doc.lines[0].elements[0] {
-            if let FieldKind::Radio { value, checked } = &f.kind {
-                assert_eq!(value, "s");
-                assert!(!checked);
-            }
+        if let Element::Field(f) = &doc.lines[0].elements[0]
+            && let FieldKind::Radio { value, checked } = &f.kind
+        {
+            assert_eq!(value, "s");
+            assert!(!checked);
         }
-        if let Element::Field(f) = &doc.lines[0].elements[4] {
-            if let FieldKind::Radio { value, checked } = &f.kind {
-                assert_eq!(value, "l");
-                assert!(checked);
-            }
+        if let Element::Field(f) = &doc.lines[0].elements[4]
+            && let FieldKind::Radio { value, checked } = &f.kind
+        {
+            assert_eq!(value, "l");
+            assert!(checked);
         }
     }
 
@@ -1509,20 +1509,20 @@ This is `!NomadNet`!.
     #[test]
     fn test_radio_value_fallback_to_label() {
         let doc = parse("`<^|choice|`Option A>");
-        if let Element::Field(f) = &doc.lines[0].elements[0] {
-            if let FieldKind::Radio { value, .. } = &f.kind {
-                assert_eq!(value, "Option A");
-            }
+        if let Element::Field(f) = &doc.lines[0].elements[0]
+            && let FieldKind::Radio { value, .. } = &f.kind
+        {
+            assert_eq!(value, "Option A");
         }
     }
 
     #[test]
     fn test_radio_explicit_value() {
         let doc = parse("`<^|choice|val`Option A>");
-        if let Element::Field(f) = &doc.lines[0].elements[0] {
-            if let FieldKind::Radio { value, .. } = &f.kind {
-                assert_eq!(value, "val");
-            }
+        if let Element::Field(f) = &doc.lines[0].elements[0]
+            && let FieldKind::Radio { value, .. } = &f.kind
+        {
+            assert_eq!(value, "val");
         }
     }
 

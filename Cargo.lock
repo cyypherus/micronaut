@@ -576,6 +576,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "ratatui",
+ "tui-input",
  "winnow",
 ]
 
@@ -1270,6 +1271,16 @@ name = "time-core"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40868e7c1d2f0b8d73e4a8c7f0ff63af4f6d19be117e90bd73eb1d62cf831c6b"
+
+[[package]]
+name = "tui-input"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dce25d24adf2c5350c57426f25cf12bc767455a6d9202be155458fc768ea1268"
+dependencies = [
+ "ratatui",
+ "unicode-width",
+]
 
 [[package]]
 name = "typenum"
