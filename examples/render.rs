@@ -7,7 +7,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use micronaut::{Browser, BrowserWidget, RatatuiRenderer};
+use micronaut::{Browser, BrowserWidget, Interaction, RatatuiRenderer};
 
 fn main() -> io::Result<()> {
     let input = std::env::args()
@@ -41,8 +41,21 @@ fn main() -> io::Result<()> {
                     KeyCode::Tab => browser.select_next(),
                     KeyCode::BackTab => browser.select_prev(),
                     KeyCode::Enter => {
-                        if let Some(link) = browser.interact() {
-                            eprintln!("Navigate to: {} (form: {:?})", link.url, link.form_data);
+                        if let Some(interaction) = browser.interact() {
+                            match interaction {
+                                Interaction::Link(link) => {
+                                    eprintln!(
+                                        "Navigate to: {} (form: {:?})",
+                                        link.url, link.form_data
+                                    );
+                                }
+                                Interaction::EditField(field) => {
+                                    eprintln!(
+                                        "Edit field: {} (current: {})",
+                                        field.name, field.value
+                                    );
+                                }
+                            }
                         }
                     }
                     _ => {}

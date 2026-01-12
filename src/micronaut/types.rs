@@ -5,7 +5,6 @@ pub struct FormState {
     pub fields: HashMap<String, String>,
     pub checkboxes: HashMap<String, bool>,
     pub radios: HashMap<String, String>,
-    pub editing_field: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -18,10 +17,22 @@ pub struct Hitbox {
 
 #[derive(Debug, Clone)]
 pub enum HitboxTarget {
-    Link { url: String, fields: Vec<String> },
-    TextField { name: String, masked: bool, default: String },
-    Checkbox { name: String },
-    Radio { name: String, value: String },
+    Link {
+        url: String,
+        fields: Vec<String>,
+    },
+    TextField {
+        name: String,
+        masked: bool,
+        default: String,
+    },
+    Checkbox {
+        name: String,
+    },
+    Radio {
+        name: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -31,8 +42,15 @@ pub struct Link {
     pub form_data: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InputResult {
-    Consumed,
-    Ignored,
+#[derive(Debug, Clone)]
+pub struct TextField {
+    pub name: String,
+    pub value: String,
+    pub masked: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum Interaction {
+    Link(Link),
+    EditField(TextField),
 }

@@ -14,12 +14,21 @@ pub struct RatatuiRenderer;
 impl Renderer for RatatuiRenderer {
     type Output = Text<'static>;
 
-    fn render(&self, doc: &Document, width: u16, form_state: &FormState) -> RenderOutput<Self::Output> {
+    fn render(
+        &self,
+        doc: &Document,
+        width: u16,
+        form_state: &FormState,
+    ) -> RenderOutput<Self::Output> {
         render_document(doc, width, form_state)
     }
 }
 
-fn render_document(doc: &Document, width: u16, form_state: &FormState) -> RenderOutput<Text<'static>> {
+fn render_document(
+    doc: &Document,
+    width: u16,
+    form_state: &FormState,
+) -> RenderOutput<Text<'static>> {
     let mut lines: Vec<RatLine> = Vec::new();
     let mut hitboxes: Vec<Hitbox> = Vec::new();
 
@@ -262,18 +271,7 @@ fn render_normal_with_hitboxes(
 
 fn render_field(field: &Field, form_state: &FormState) -> Span<'static> {
     let width = field.width.unwrap_or(DEFAULT_FIELD_WIDTH) as usize;
-
-    let is_editing = form_state
-        .editing_field
-        .as_ref()
-        .map(|name| name == &field.name)
-        .unwrap_or(false);
-
-    let style = if is_editing {
-        RatStyle::default().fg(RatColor::Black).bg(RatColor::Yellow)
-    } else {
-        RatStyle::default().fg(RatColor::Black).bg(RatColor::White)
-    };
+    let style = RatStyle::default().fg(RatColor::Black).bg(RatColor::White);
 
     match &field.kind {
         FieldKind::Text => {
@@ -291,16 +289,7 @@ fn render_field(field: &Field, form_state: &FormState) -> Span<'static> {
                 s
             };
 
-            let padded = if is_editing {
-                let cursor_pos = display.len();
-                if cursor_pos < width {
-                    format!("{}_{}", display, " ".repeat(width - cursor_pos - 1))
-                } else {
-                    format!("{:<width$}", display, width = width)
-                }
-            } else {
-                format!("{:<width$}", display, width = width)
-            };
+            let padded = format!("{:<width$}", display, width = width);
             Span::styled(padded, style)
         }
         FieldKind::Checkbox { checked } => {

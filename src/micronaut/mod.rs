@@ -9,13 +9,16 @@ mod types;
 #[cfg(feature = "ratatui")]
 mod widget;
 
-pub use ast::{Alignment, Color, Document, Element, Field, FieldKind, Line, LineKind, LinkElement, Partial, Style, StyledText};
+pub use ast::{
+    Alignment, Color, Document, Element, Field, FieldKind, Line, LineKind, LinkElement, Partial,
+    Style, StyledText,
+};
 pub use parser::parse;
 
 #[cfg(feature = "browser")]
 pub use browser::{Browser, Renderer};
 #[cfg(feature = "browser")]
-pub use types::{InputResult, Link};
+pub use types::{Interaction, Link, TextField};
 
 #[cfg(feature = "ratatui")]
 pub use self::ratatui::RatatuiRenderer;
