@@ -3,7 +3,7 @@ use ratatui::text::{Line as RatLine, Span, Text};
 
 use crate::micronaut::ast::*;
 use crate::micronaut::browser::{RenderOutput, Renderer};
-use crate::micronaut::types::{FormState, Hitbox, HitboxTarget};
+use crate::micronaut::types::{FormState, Hitbox, Interactable};
 
 const SECTION_INDENT: u16 = 2;
 const DEFAULT_FIELD_WIDTH: u16 = 24;
@@ -19,8 +19,9 @@ impl Renderer for RatatuiRenderer {
         doc: &Document,
         width: u16,
         form_state: &FormState,
+        selected_interactable: Option<usize>,
     ) -> RenderOutput<Self::Output> {
-        render_document(doc, width, form_state)
+        render_document(doc, width, form_state, selected_interactable)
     }
 }
 
@@ -28,13 +29,22 @@ fn render_document(
     doc: &Document,
     width: u16,
     form_state: &FormState,
+    selected_interactable: Option<usize>,
 ) -> RenderOutput<Text<'static>> {
     let mut lines: Vec<RatLine> = Vec::new();
     let mut hitboxes: Vec<Hitbox> = Vec::new();
+    let mut interactable_idx = 0usize;
 
     for line in &doc.lines {
         let row = lines.len();
-        let (rendered, mut hits) = render_line_with_hitboxes(line, row, width, form_state);
+        let (rendered, mut hits) = render_line_with_hitboxes(
+            line,
+            row,
+            width,
+            form_state,
+            selected_interactable,
+            &mut interactable_idx,
+        );
         lines.extend(rendered);
         hitboxes.append(&mut hits);
     }
@@ -99,12 +109,21 @@ fn render_line_with_hitboxes(
     row: usize,
     width: u16,
     form_state: &FormState,
+    selected_interactable: Option<usize>,
+    interactable_idx: &mut usize,
 ) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
     match line.kind {
         LineKind::Comment => (vec![], vec![]),
         LineKind::Divider(ch) => (render_divider(ch, line.indent_depth, width), vec![]),
         LineKind::Heading(level) => (render_heading(line, level, width), vec![]),
-        LineKind::Normal => render_normal_with_hitboxes(line, row, width, form_state),
+        LineKind::Normal => render_normal_with_hitboxes(
+            line,
+            row,
+            width,
+            form_state,
+            selected_interactable,
+            interactable_idx,
+        ),
     }
 }
 
@@ -144,7 +163,7 @@ fn render_heading(line: &Line, level: u8, width: u16) -> Vec<RatLine<'static>> {
 struct WrappedSpan {
     text: String,
     style: RatStyle,
-    hitbox: Option<HitboxTarget>,
+    interactable: Option<Interactable>,
 }
 
 fn render_normal_with_hitboxes(
@@ -152,6 +171,8 @@ fn render_normal_with_hitboxes(
     row: usize,
     width: u16,
     form_state: &FormState,
+    selected_interactable: Option<usize>,
+    interactable_idx: &mut usize,
 ) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
     let indent = line.indent_depth.saturating_sub(1) as u16 * SECTION_INDENT;
     let content_width = (width as usize).saturating_sub(indent as usize);
@@ -168,33 +189,40 @@ fn render_normal_with_hitboxes(
                 wrapped_spans.push(WrappedSpan {
                     text: styled.text.clone(),
                     style: convert_style(&styled.style),
-                    hitbox: None,
+                    interactable: None,
                 });
             }
             Element::Link(link) => {
+                let selected = selected_interactable == Some(*interactable_idx);
+                *interactable_idx += 1;
                 let mut style = convert_style(&link.style);
                 style = style.add_modifier(Modifier::UNDERLINED);
+                if selected {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
                 wrapped_spans.push(WrappedSpan {
                     text: link.label.clone(),
                     style,
-                    hitbox: Some(HitboxTarget::Link {
+                    interactable: Some(Interactable::Link {
                         url: link.url.clone(),
                         fields: link.fields.clone(),
                     }),
                 });
             }
             Element::Field(field) => {
-                let span = render_field(field, form_state);
-                let target = match &field.kind {
-                    FieldKind::Text => HitboxTarget::TextField {
+                let selected = selected_interactable == Some(*interactable_idx);
+                *interactable_idx += 1;
+                let span = render_field(field, form_state, selected);
+                let interactable = match &field.kind {
+                    FieldKind::Text => Interactable::TextField {
                         name: field.name.clone(),
                         masked: field.masked,
                         default: field.default.clone(),
                     },
-                    FieldKind::Checkbox { .. } => HitboxTarget::Checkbox {
+                    FieldKind::Checkbox { .. } => Interactable::Checkbox {
                         name: field.name.clone(),
                     },
-                    FieldKind::Radio { value, .. } => HitboxTarget::Radio {
+                    FieldKind::Radio { value, .. } => Interactable::Radio {
                         name: field.name.clone(),
                         value: value.clone(),
                     },
@@ -202,14 +230,14 @@ fn render_normal_with_hitboxes(
                 wrapped_spans.push(WrappedSpan {
                     text: span.content.to_string(),
                     style: span.style,
-                    hitbox: Some(target),
+                    interactable: Some(interactable),
                 });
             }
             Element::Partial(partial) => {
                 wrapped_spans.push(WrappedSpan {
                     text: format!("[partial:{}]", partial.url),
                     style: RatStyle::default(),
-                    hitbox: None,
+                    interactable: None,
                 });
             }
         }
@@ -247,12 +275,12 @@ fn render_normal_with_hitboxes(
             let chunk: String = chars[char_idx..char_idx + take_count].iter().collect();
             let chunk_len = chunk.chars().count();
 
-            if let Some(ref target) = ws.hitbox {
+            if let Some(ref interactable) = ws.interactable {
                 hitboxes.push(Hitbox {
                     line: current_row,
                     col_start: current_col + indent as usize,
                     col_end: current_col + indent as usize + chunk_len,
-                    target: target.clone(),
+                    interactable: interactable.clone(),
                 });
             }
 
@@ -269,9 +297,12 @@ fn render_normal_with_hitboxes(
     (lines, hitboxes)
 }
 
-fn render_field(field: &Field, form_state: &FormState) -> Span<'static> {
+fn render_field(field: &Field, form_state: &FormState, selected: bool) -> Span<'static> {
     let width = field.width.unwrap_or(DEFAULT_FIELD_WIDTH) as usize;
-    let style = RatStyle::default().fg(RatColor::Black).bg(RatColor::White);
+    let mut style = RatStyle::default().fg(RatColor::Black).bg(RatColor::White);
+    if selected {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
 
     match &field.kind {
         FieldKind::Text => {
@@ -349,7 +380,7 @@ mod tests {
     use crate::micronaut::parse;
 
     fn render(doc: &Document, width: u16) -> Text<'static> {
-        render_document(doc, width, &FormState::default()).content
+        render_document(doc, width, &FormState::default(), None).content
     }
 
     #[test]
@@ -418,7 +449,7 @@ mod tests {
     #[test]
     fn test_hitbox_positions_simple() {
         let doc = parse("Hello `[Link`http://x]");
-        let output = render_document(&doc, 80, &FormState::default());
+        let output = render_document(&doc, 80, &FormState::default(), None);
         assert_eq!(output.hitboxes.len(), 1);
         let hb = &output.hitboxes[0];
         assert_eq!(hb.line, 0);
@@ -429,7 +460,7 @@ mod tests {
     #[test]
     fn test_hitbox_wrapped_link() {
         let doc = parse("Some text `[Click here now`http://x]");
-        let output = render_document(&doc, 20, &FormState::default());
+        let output = render_document(&doc, 20, &FormState::default(), None);
 
         assert_eq!(
             output.hitboxes.len(),

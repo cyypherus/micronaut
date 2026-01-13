@@ -1,6 +1,6 @@
 use crate::micronaut::ast::Document;
 use crate::micronaut::parser::parse;
-use crate::micronaut::types::{FormState, Hitbox, HitboxTarget, Interaction, Link, TextField};
+use crate::micronaut::types::{FormState, Hitbox, Interactable, Interaction, Link, TextField};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -36,6 +36,7 @@ pub trait Renderer {
         doc: &Document,
         width: u16,
         form_state: &FormState,
+        selected_interactable: Option<usize>,
     ) -> RenderOutput<Self::Output>;
 }
 
@@ -112,28 +113,35 @@ impl<R: Renderer> Browser<R> {
         };
 
         let doc = parse(content);
-        let output = self.renderer.render(&doc, self.width, &self.form_state());
+        let selected = if self.hitboxes.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        };
+        let output = self
+            .renderer
+            .render(&doc, self.width, &self.form_state(), selected);
         self.hitboxes = output.hitboxes;
         self.content_height = output.height;
         self.cached_output = Some(output.content);
         self.render_dirty = false;
 
         for hitbox in &self.hitboxes {
-            match &hitbox.target {
-                HitboxTarget::TextField { name, default, .. } => {
+            match &hitbox.interactable {
+                Interactable::TextField { name, default, .. } => {
                     self.field_values
                         .entry(name.clone())
                         .or_insert_with(|| default.clone());
                 }
-                HitboxTarget::Checkbox { name } => {
+                Interactable::Checkbox { name } => {
                     self.checkbox_states.entry(name.clone()).or_insert(false);
                 }
-                HitboxTarget::Radio { name, value } => {
+                Interactable::Radio { name, value } => {
                     self.radio_states
                         .entry(name.clone())
                         .or_insert_with(|| value.clone());
                 }
-                HitboxTarget::Link { .. } => {}
+                Interactable::Link { .. } => {}
             }
         }
     }
@@ -143,7 +151,14 @@ impl<R: Renderer> Browser<R> {
             return;
         };
         let doc = parse(content);
-        let output = self.renderer.render(&doc, self.width, &self.form_state());
+        let selected = if self.hitboxes.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        };
+        let output = self
+            .renderer
+            .render(&doc, self.width, &self.form_state(), selected);
         self.cached_output = Some(output.content);
         self.render_dirty = false;
     }
@@ -228,6 +243,7 @@ impl<R: Renderer> Browser<R> {
         if !self.hitboxes.is_empty() {
             self.selected = (self.selected + 1) % self.hitboxes.len();
             self.ensure_selected_visible();
+            self.render_dirty = true;
         }
     }
 
@@ -238,6 +254,7 @@ impl<R: Renderer> Browser<R> {
                 .checked_sub(1)
                 .unwrap_or(self.hitboxes.len() - 1);
             self.ensure_selected_visible();
+            self.render_dirty = true;
         }
     }
 
@@ -255,13 +272,13 @@ impl<R: Renderer> Browser<R> {
     pub fn interact(&mut self) -> Option<Interaction> {
         let hitbox = self.hitboxes.get(self.selected)?;
 
-        match &hitbox.target {
-            HitboxTarget::Link { url, fields } => Some(Interaction::Link(Link {
+        match &hitbox.interactable {
+            Interactable::Link { url, fields } => Some(Interaction::Link(Link {
                 url: url.clone(),
                 fields: fields.clone(),
                 form_data: self.collect_form_data(fields),
             })),
-            HitboxTarget::TextField { name, masked, .. } => {
+            Interactable::TextField { name, masked, .. } => {
                 let value = self.field_values.get(name).cloned().unwrap_or_default();
                 Some(Interaction::EditField(TextField {
                     name: name.clone(),
@@ -269,13 +286,13 @@ impl<R: Renderer> Browser<R> {
                     masked: *masked,
                 }))
             }
-            HitboxTarget::Checkbox { name } => {
+            Interactable::Checkbox { name } => {
                 let current = self.checkbox_states.get(name).copied().unwrap_or(false);
                 self.checkbox_states.insert(name.clone(), !current);
                 self.render_dirty = true;
                 None
             }
-            HitboxTarget::Radio { name, value } => {
+            Interactable::Radio { name, value } => {
                 self.radio_states.insert(name.clone(), value.clone());
                 self.render_dirty = true;
                 None
@@ -290,6 +307,7 @@ impl<R: Renderer> Browser<R> {
         for (idx, hitbox) in self.hitboxes.iter().enumerate() {
             if hitbox.line == doc_y && doc_x >= hitbox.col_start && doc_x < hitbox.col_end {
                 self.selected = idx;
+                self.render_dirty = true;
                 return self.interact();
             }
         }
@@ -341,8 +359,8 @@ impl<R: Renderer> Browser<R> {
 
     pub fn selected_link(&self) -> Option<&str> {
         let hitbox = self.hitboxes.get(self.selected)?;
-        match &hitbox.target {
-            HitboxTarget::Link { url, .. } => Some(url),
+        match &hitbox.interactable {
+            Interactable::Link { url, .. } => Some(url),
             _ => None,
         }
     }
@@ -362,7 +380,13 @@ mod tests {
     impl Renderer for NullRenderer {
         type Output = ();
 
-        fn render(&self, doc: &Document, _width: u16, _form_state: &FormState) -> RenderOutput<()> {
+        fn render(
+            &self,
+            doc: &Document,
+            _width: u16,
+            _form_state: &FormState,
+            _selected: Option<usize>,
+        ) -> RenderOutput<()> {
             let mut hitboxes = Vec::new();
             for (line_idx, line) in doc.lines.iter().enumerate() {
                 let mut col = 0;
@@ -374,7 +398,7 @@ mod tests {
                                 line: line_idx,
                                 col_start: col,
                                 col_end: col + len,
-                                target: HitboxTarget::Link {
+                                interactable: Interactable::Link {
                                     url: link.url.clone(),
                                     fields: link.fields.clone(),
                                 },
@@ -383,16 +407,16 @@ mod tests {
                         }
                         Element::Field(field) => {
                             let len = 24;
-                            let target = match &field.kind {
-                                FieldKind::Text => HitboxTarget::TextField {
+                            let interactable = match &field.kind {
+                                FieldKind::Text => Interactable::TextField {
                                     name: field.name.clone(),
                                     masked: field.masked,
                                     default: field.default.clone(),
                                 },
-                                FieldKind::Checkbox { .. } => HitboxTarget::Checkbox {
+                                FieldKind::Checkbox { .. } => Interactable::Checkbox {
                                     name: field.name.clone(),
                                 },
-                                FieldKind::Radio { value, .. } => HitboxTarget::Radio {
+                                FieldKind::Radio { value, .. } => Interactable::Radio {
                                     name: field.name.clone(),
                                     value: value.clone(),
                                 },
@@ -401,7 +425,7 @@ mod tests {
                                 line: line_idx,
                                 col_start: col,
                                 col_end: col + len,
-                                target,
+                                interactable,
                             });
                             col += len;
                         }

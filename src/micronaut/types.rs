@@ -12,11 +12,11 @@ pub struct Hitbox {
     pub line: usize,
     pub col_start: usize,
     pub col_end: usize,
-    pub target: HitboxTarget,
+    pub interactable: Interactable,
 }
 
 #[derive(Debug, Clone)]
-pub enum HitboxTarget {
+pub enum Interactable {
     Link {
         url: String,
         fields: Vec<String>,

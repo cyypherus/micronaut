@@ -179,6 +179,24 @@ fn main() -> io::Result<()> {
                 Mode::Browse => match &evt {
                     Event::Key(key) => match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Tab | KeyCode::Char('j') => browser.select_next(),
+                        KeyCode::BackTab | KeyCode::Char('k') => browser.select_prev(),
+                        KeyCode::Enter => {
+                            if let Some(interaction) = browser.interact() {
+                                match interaction {
+                                    Interaction::Link(link) => {
+                                        mode = Mode::Navigate { link };
+                                    }
+                                    Interaction::EditField(field) => {
+                                        input = Input::new(field.value);
+                                        mode = Mode::Edit {
+                                            field_name: field.name,
+                                            masked: field.masked,
+                                        };
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     },
                     Event::Mouse(mouse) => match mouse.kind {
