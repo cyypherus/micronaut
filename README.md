@@ -12,6 +12,8 @@ Micron is a markup webpage format spearheaded by [nomadnet](https://github.com/m
 There is no official spec that I know of, but the reference implementation exists [in the nomadnet repo](https://github.com/markqvist/NomadNet/blob/master/nomadnet/ui/textui/MicronParser.py) and many micron pages are served over nomadnet itself.
 There's a micron playground implemented [here](https://github.com/RFnexus/micron-parser-js)
 
+<img width="100%" alt="Screenshot 2026-01-16 at 3 57 36 PM" src="https://github.com/user-attachments/assets/52f2a9ee-e3f2-4a20-a264-4764c1c1faca" />
+
 # Features
 - micronaut implements a standalone parser by default
 - micronaut also _optionally_ implements a minimal browser implementation behind the `browser` feature.
