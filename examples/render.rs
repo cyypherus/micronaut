@@ -241,7 +241,7 @@ fn main() -> io::Result<()> {
                         if let MouseEventKind::Down(_) = mouse.kind {
                             let (x, y) = (mouse.column, mouse.row);
                             if button_rects
-                                .get(0)
+                                .first()
                                 .is_some_and(|r| r.contains((x, y).into()))
                             {
                                 input.reset();
@@ -272,7 +272,7 @@ fn main() -> io::Result<()> {
                         if let MouseEventKind::Down(_) = mouse.kind {
                             let (x, y) = (mouse.column, mouse.row);
                             if button_rects
-                                .get(0)
+                                .first()
                                 .is_some_and(|r| r.contains((x, y).into()))
                                 || button_rects
                                     .get(1)
