@@ -228,7 +228,11 @@ impl<R: Renderer> Browser<R> {
 
     pub fn scroll_to(&mut self, y: u16) {
         let max = self.content_height.saturating_sub(self.height);
-        self.scroll = y.min(max);
+        let new_scroll = y.min(max);
+        if self.scroll != new_scroll {
+            self.scroll = new_scroll;
+            self.render_dirty = true;
+        }
     }
 
     pub fn scroll_by(&mut self, delta: i32) {

@@ -96,9 +96,10 @@ fn main() -> io::Result<()> {
     let mut input = Input::default();
     let mut button_rects: Vec<Rect> = Vec::new();
 
-    loop {
+    'runloop: loop {
         terminal.draw(|frame| {
             let area = frame.area();
+            browser.resize(area.width, area.height);
             if let Some(rendered) = browser.render() {
                 rendered.render(area, frame.buffer_mut());
             } else {
@@ -182,12 +183,12 @@ fn main() -> io::Result<()> {
             }
         })?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
+        while event::poll(std::time::Duration::from_millis(0))? {
             let evt = event::read()?;
             match &mode {
                 Mode::Browse => match &evt {
                     Event::Key(key) => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Char('q') | KeyCode::Esc => break 'runloop,
                         KeyCode::Tab | KeyCode::Char('j') => browser.select_next(),
                         KeyCode::BackTab | KeyCode::Char('k') => browser.select_prev(),
                         KeyCode::Enter => {
