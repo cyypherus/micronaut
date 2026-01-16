@@ -226,8 +226,8 @@ fn main() -> io::Result<()> {
                                 }
                             }
                         }
-                        MouseEventKind::ScrollDown => browser.scroll_by(3),
-                        MouseEventKind::ScrollUp => browser.scroll_by(-3),
+                        MouseEventKind::ScrollDown => browser.scroll_by(1),
+                        MouseEventKind::ScrollUp => browser.scroll_by(-1),
                         _ => {}
                     },
                     _ => {}
