@@ -13,7 +13,7 @@ use ratatui::{
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use micronaut::{Browser, BrowserWidget, Interaction, Link, RatatuiRenderer};
+use micronaut::{Browser, Interaction, Link, RatatuiRenderer};
 
 enum Mode {
     Browse,
@@ -99,7 +99,16 @@ fn main() -> io::Result<()> {
     loop {
         terminal.draw(|frame| {
             let area = frame.area();
-            frame.render_widget(BrowserWidget::new(&mut browser), area);
+            if let Some(rendered) = browser.render() {
+                rendered.render(area, frame.buffer_mut());
+            } else {
+                Paragraph::new(Text::styled(
+                    "No content",
+                    Style::default().fg(Color::DarkGray),
+                ))
+                .alignment(ratatui::layout::Alignment::Center)
+                .render(area, frame.buffer_mut());
+            }
 
             match &mode {
                 Mode::Browse => {

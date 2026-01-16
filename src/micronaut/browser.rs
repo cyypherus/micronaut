@@ -35,6 +35,7 @@ pub trait Renderer {
         &self,
         doc: &Document,
         width: u16,
+        scroll: u16,
         form_state: &FormState,
         selected_interactable: Option<usize>,
     ) -> RenderOutput<Self::Output>;
@@ -118,9 +119,9 @@ impl<R: Renderer> Browser<R> {
         } else {
             Some(self.selected)
         };
-        let output = self
-            .renderer
-            .render(&doc, self.width, &self.form_state(), selected);
+        let output =
+            self.renderer
+                .render(&doc, self.width, self.scroll, &self.form_state(), selected);
         self.hitboxes = output.hitboxes;
         self.content_height = output.height;
         self.cached_output = Some(output.content);
@@ -156,9 +157,9 @@ impl<R: Renderer> Browser<R> {
         } else {
             Some(self.selected)
         };
-        let output = self
-            .renderer
-            .render(&doc, self.width, &self.form_state(), selected);
+        let output =
+            self.renderer
+                .render(&doc, self.width, self.scroll, &self.form_state(), selected);
         self.cached_output = Some(output.content);
         self.render_dirty = false;
     }
@@ -384,6 +385,7 @@ mod tests {
             &self,
             doc: &Document,
             _width: u16,
+            _scroll: u16,
             _form_state: &FormState,
             _selected: Option<usize>,
         ) -> RenderOutput<()> {

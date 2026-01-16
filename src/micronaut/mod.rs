@@ -22,5 +22,5 @@ pub use types::{Interaction, Link, TextField};
 
 #[cfg(feature = "ratatui")]
 pub use self::ratatui::RatatuiRenderer;
-#[cfg(feature = "ratatui")]
-pub use self::widget::BrowserWidget;
+// #[cfg(feature = "ratatui")]
+// pub use self::widget::BrowserWidget;

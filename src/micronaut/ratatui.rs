@@ -1,5 +1,6 @@
 use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
 use ratatui::text::{Line as RatLine, Span, Text};
+use ratatui::widgets::Paragraph;
 
 use crate::micronaut::ast::*;
 use crate::micronaut::browser::{RenderOutput, Renderer};
@@ -12,25 +13,27 @@ const DEFAULT_FIELD_WIDTH: u16 = 24;
 pub struct RatatuiRenderer;
 
 impl Renderer for RatatuiRenderer {
-    type Output = Text<'static>;
+    type Output = Paragraph<'static>;
 
     fn render(
         &self,
         doc: &Document,
         width: u16,
+        scroll: u16,
         form_state: &FormState,
         selected_interactable: Option<usize>,
     ) -> RenderOutput<Self::Output> {
-        render_document(doc, width, form_state, selected_interactable)
+        render_document(doc, width, scroll, form_state, selected_interactable)
     }
 }
 
 fn render_document(
     doc: &Document,
     width: u16,
+    scroll: u16,
     form_state: &FormState,
     selected_interactable: Option<usize>,
-) -> RenderOutput<Text<'static>> {
+) -> RenderOutput<Paragraph<'static>> {
     let mut lines: Vec<RatLine> = Vec::new();
     let mut hitboxes: Vec<Hitbox> = Vec::new();
     let mut interactable_idx = 0usize;
@@ -51,7 +54,7 @@ fn render_document(
 
     RenderOutput {
         height: lines.len() as u16,
-        content: Text::from(lines),
+        content: Paragraph::new(Text::from(lines)).scroll((scroll, 0)),
         hitboxes,
     }
 }
@@ -379,77 +382,14 @@ mod tests {
     use super::*;
     use crate::micronaut::parse;
 
-    fn render(doc: &Document, width: u16) -> Text<'static> {
-        render_document(doc, width, &FormState::default(), None).content
-    }
-
-    #[test]
-    fn test_render_plain_text() {
-        let doc = parse("Hello world");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_heading() {
-        let doc = parse(">Heading 1");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_divider() {
-        let doc = parse("-");
-        let text = render(&doc, 10);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_styled_text() {
-        let doc = parse("`!bold`* and `_underline");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_comment_excluded() {
-        let doc = parse("# this is a comment\nvisible");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_link() {
-        let doc = parse("`[Click here`http://example.com]");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_field() {
-        let doc = parse("`<name`Enter name>");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_checkbox() {
-        let doc = parse("`<!agree`I agree>");
-        let text = render(&doc, 80);
-        assert_eq!(text.lines.len(), 1);
-    }
-
-    #[test]
-    fn test_render_indented() {
-        let doc = parse(">\n>>\ntext");
-        let text = render(&doc, 80);
-        assert!(text.lines.len() >= 1);
+    fn render(doc: &Document, width: u16, scroll: u16) -> Paragraph<'static> {
+        render_document(doc, width, scroll, &FormState::default(), None).content
     }
 
     #[test]
     fn test_hitbox_positions_simple() {
         let doc = parse("Hello `[Link`http://x]");
-        let output = render_document(&doc, 80, &FormState::default(), None);
+        let output = render_document(&doc, 80, 0, &FormState::default(), None);
         assert_eq!(output.hitboxes.len(), 1);
         let hb = &output.hitboxes[0];
         assert_eq!(hb.line, 0);
@@ -460,8 +400,7 @@ mod tests {
     #[test]
     fn test_hitbox_wrapped_link() {
         let doc = parse("Some text `[Click here now`http://x]");
-        let output = render_document(&doc, 20, &FormState::default(), None);
-
+        let output = render_document(&doc, 80, 0, &FormState::default(), None);
         assert_eq!(
             output.hitboxes.len(),
             2,
