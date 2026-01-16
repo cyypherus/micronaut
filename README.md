@@ -3,21 +3,28 @@
 
 # micronaut
 
-**A rendering agnostic nomadnet micron parser & browser**
+**A nomadnet micron parser & browser**
 
 </div>
 
+> [!NOTE]
+> `micronaut` _only_ implements micron parsing, super simple browsing functionality, and a ratatui integration for displaying micron pages in a TUI
+> - `micronaut` doesn't do any networking
+> - `micronaut` doesn't render anything on the screen by itself
+ 
+# Micron
 Micron is a markup webpage format spearheaded by [nomadnet](https://github.com/markqvist/NomadNet)
 
-There is no official spec that I know of, but the reference implementation exists [in the nomadnet repo](https://github.com/markqvist/NomadNet/blob/master/nomadnet/ui/textui/MicronParser.py) and many micron pages are served over nomadnet itself.
-There's a micron playground implemented [here](https://github.com/RFnexus/micron-parser-js)
+There is no official micron spec that I know of, but the reference implementation exists [in the nomadnet repo](https://github.com/markqvist/NomadNet/blob/master/nomadnet/ui/textui/MicronParser.py) and many micron pages are served over nomadnet itself.
+
+There's also a micron editor implemented [here](https://github.com/RFnexus/micron-parser-js)
 
 <img width="100%" alt="Screenshot 2026-01-16 at 3 57 36 PM" src="https://github.com/user-attachments/assets/52f2a9ee-e3f2-4a20-a264-4764c1c1faca" />
 
 # Features
-- micronaut implements a standalone parser by default
-- micronaut also _optionally_ implements a minimal browser implementation behind the `browser` feature.
-- micronaut also _optionally_ implements a [ratatui](https://github.com/ratatui/ratatui) renderer, converting a parsed micron document into a ratatui widget for display in ratatui TUIs
+- `default` features - micronaut implements a standalone parser by default
+- `browser` feature - is an optional, minimal browser implementation.
+- `ratatui` feature - is an optional [ratatui](https://github.com/ratatui/ratatui) renderer, converting a parsed micron document into a ratatui widget for display in ratatui TUIs
 
 # Parser
 ```rust
@@ -52,7 +59,7 @@ There's a micron playground implemented [here](https://github.com/RFnexus/micron
 ```
 
 The `Renderer` trait's responsibility is _solely_ to turn a `Document` into something that you know how to show on your screen.
-> *Do note: micronaut is not really concerned with how you get things onto your screen, one could implement an alternative HTML "renderer" for converting a micronaut Document to HTML & display micron in a standard browser*
+> *Again, micronaut is not really concerned with how you get things onto your screen, one could implement an alternative HTML "renderer" for converting a micronaut Document to HTML & display micron in a standard browser*
 
 The `Browser` struct handles simple, common browser functionality like forward / backward, rerendering and caching, scroll state, field interactions, and clicking.
 
