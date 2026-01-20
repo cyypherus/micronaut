@@ -1,6 +1,7 @@
 use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
 use ratatui::text::{Line as RatLine, Span, Text};
 use ratatui::widgets::Paragraph;
+use unicode_width::UnicodeWidthStr;
 
 use crate::micronaut::ast::*;
 use crate::micronaut::browser::{RenderOutput, Renderer};
@@ -166,7 +167,7 @@ fn render_heading(line: &Line, level: u8, width: u16) -> Vec<RatLine<'static>> {
 struct WrappedSpan {
     text: String,
     style: RatStyle,
-    interactable: Option<Interactable>,
+    interactable: Option<(usize, Interactable)>,
 }
 
 fn render_normal_with_hitboxes(
@@ -196,7 +197,8 @@ fn render_normal_with_hitboxes(
                 });
             }
             Element::Link(link) => {
-                let selected = selected_interactable == Some(*interactable_idx);
+                let idx = *interactable_idx;
+                let selected = selected_interactable == Some(idx);
                 *interactable_idx += 1;
                 let mut style = convert_style(&link.style);
                 style = style.add_modifier(Modifier::UNDERLINED);
@@ -206,14 +208,18 @@ fn render_normal_with_hitboxes(
                 wrapped_spans.push(WrappedSpan {
                     text: link.label.clone(),
                     style,
-                    interactable: Some(Interactable::Link {
-                        url: link.url.clone(),
-                        fields: link.fields.clone(),
-                    }),
+                    interactable: Some((
+                        idx,
+                        Interactable::Link {
+                            url: link.url.clone(),
+                            fields: link.fields.clone(),
+                        },
+                    )),
                 });
             }
             Element::Field(field) => {
-                let selected = selected_interactable == Some(*interactable_idx);
+                let idx = *interactable_idx;
+                let selected = selected_interactable == Some(idx);
                 *interactable_idx += 1;
                 let span = render_field(field, form_state, selected);
                 let interactable = match &field.kind {
@@ -233,7 +239,7 @@ fn render_normal_with_hitboxes(
                 wrapped_spans.push(WrappedSpan {
                     text: span.content.to_string(),
                     style: span.style,
-                    interactable: Some(interactable),
+                    interactable: Some((idx, interactable)),
                 });
             }
             Element::Partial(partial) => {
@@ -273,23 +279,23 @@ fn render_normal_with_hitboxes(
                 continue;
             }
 
-            let chars_left = chars.len() - char_idx;
-            let take_count = std::cmp::min(remaining_width, chars_left);
-            let chunk: String = chars[char_idx..char_idx + take_count].iter().collect();
-            let chunk_len = chunk.chars().count();
+            let (chunk, chunk_width) =
+                take_by_width(&chars[char_idx..], remaining_width);
+            let chars_taken = chunk.chars().count();
 
-            if let Some(ref interactable) = ws.interactable {
+            if let Some((idx, ref interactable)) = ws.interactable {
                 hitboxes.push(Hitbox {
                     line: current_row,
                     col_start: current_col + indent as usize,
-                    col_end: current_col + indent as usize + chunk_len,
+                    col_end: current_col + indent as usize + chunk_width,
                     interactable: interactable.clone(),
+                    interactable_idx: idx,
                 });
             }
 
             current_line_spans.push(Span::styled(chunk, ws.style));
-            current_col += chunk_len;
-            char_idx += take_count;
+            current_col += chunk_width;
+            char_idx += chars_taken;
         }
     }
 
@@ -360,12 +366,27 @@ fn collect_text(elements: &[Element]) -> String {
         .collect()
 }
 
+fn take_by_width(chars: &[char], max_width: usize) -> (String, usize) {
+    use unicode_width::UnicodeWidthChar;
+    let mut result = String::new();
+    let mut width = 0;
+    for &ch in chars {
+        let ch_width = ch.width().unwrap_or(0);
+        if width + ch_width > max_width {
+            break;
+        }
+        result.push(ch);
+        width += ch_width;
+    }
+    (result, width)
+}
+
 fn pad_to_width(text: &str, width: usize, alignment: Alignment) -> String {
-    let len = text.chars().count();
-    if len >= width {
+    let text_width = text.width();
+    if text_width >= width {
         return text.to_string();
     }
-    let padding = width - len;
+    let padding = width - text_width;
     match alignment {
         Alignment::Left => format!("{}{}", text, " ".repeat(padding)),
         Alignment::Right => format!("{}{}", " ".repeat(padding), text),
@@ -400,7 +421,7 @@ mod tests {
     #[test]
     fn test_hitbox_wrapped_link() {
         let doc = parse("Some text `[Click here now`http://x]");
-        let output = render_document(&doc, 80, 0, &FormState::default(), None);
+        let output = render_document(&doc, 18, 0, &FormState::default(), None);
         assert_eq!(
             output.hitboxes.len(),
             2,
@@ -409,8 +430,130 @@ mod tests {
 
         assert_eq!(output.hitboxes[0].line, 0);
         assert_eq!(output.hitboxes[0].col_start, 10);
+        assert_eq!(output.hitboxes[0].col_end, 18);
 
         assert_eq!(output.hitboxes[1].line, 1);
         assert_eq!(output.hitboxes[1].col_start, 0);
+        assert_eq!(output.hitboxes[1].col_end, 6);
+    }
+
+    #[test]
+    fn test_hitbox_after_emoji() {
+        let doc = parse("🦀 `[Go`http://x]");
+        let output = render_document(&doc, 80, 0, &FormState::default(), None);
+        assert_eq!(output.hitboxes.len(), 1);
+        let hb = &output.hitboxes[0];
+        assert_eq!(hb.col_start, 3, "emoji is 2 cols wide + 1 space = col 3");
+        assert_eq!(hb.col_end, 5, "Go is 2 chars wide");
+    }
+
+    #[test]
+    fn test_hitbox_link_starts_on_wrapped_line() {
+        let doc = parse("0123456789`[Link`http://x]");
+        let output = render_document(&doc, 10, 0, &FormState::default(), None);
+
+        assert_eq!(output.height, 2, "Should be 2 lines");
+        assert_eq!(output.hitboxes.len(), 1);
+        let hb = &output.hitboxes[0];
+        assert_eq!(hb.line, 1, "Link should be on line 1 (after wrap)");
+        assert_eq!(hb.col_start, 0);
+        assert_eq!(hb.col_end, 4);
+    }
+
+    #[test]
+    fn test_hitbox_link_wraps_at_exact_boundary() {
+        let doc = parse("12345`[ABCDE`http://x]");
+        let output = render_document(&doc, 10, 0, &FormState::default(), None);
+
+        assert_eq!(output.height, 1, "Should be 1 line (exactly 10 chars)");
+        assert_eq!(output.hitboxes.len(), 1, "Link fits on first line, no wrap");
+        let hb = &output.hitboxes[0];
+        assert_eq!(hb.line, 0);
+        assert_eq!(hb.col_start, 5);
+        assert_eq!(hb.col_end, 10);
+    }
+
+    #[test]
+    fn test_hitbox_link_wraps_one_char_over() {
+        let doc = parse("12345`[ABCDEF`http://x]");
+        let output = render_document(&doc, 10, 0, &FormState::default(), None);
+
+        assert_eq!(output.height, 2, "Should be 2 lines");
+        assert_eq!(
+            output.hitboxes.len(),
+            2,
+            "Link wraps, should have 2 hitboxes"
+        );
+
+        assert_eq!(output.hitboxes[0].line, 0);
+        assert_eq!(output.hitboxes[0].col_start, 5);
+        assert_eq!(output.hitboxes[0].col_end, 10);
+
+        assert_eq!(output.hitboxes[1].line, 1);
+        assert_eq!(output.hitboxes[1].col_start, 0);
+        assert_eq!(output.hitboxes[1].col_end, 1);
+    }
+
+    #[test]
+    fn test_hitbox_multiple_lines_before_link() {
+        let doc = parse("Line one here.\nSecond line. `[Link`http://x]");
+        let output = render_document(&doc, 80, 0, &FormState::default(), None);
+
+        assert_eq!(output.hitboxes.len(), 1);
+        let hb = &output.hitboxes[0];
+        assert_eq!(hb.line, 1, "Link should be on second document line");
+        assert_eq!(hb.col_start, 13);
+        assert_eq!(hb.col_end, 17);
+    }
+
+    #[test]
+    fn test_hitbox_wrapped_text_then_link() {
+        let doc = parse("This is a long line of text `[Link`http://x]");
+        let output = render_document(&doc, 15, 0, &FormState::default(), None);
+
+        println!("Height: {}", output.height);
+        for (i, hb) in output.hitboxes.iter().enumerate() {
+            println!(
+                "Hitbox {}: line={}, col_start={}, col_end={}",
+                i, hb.line, hb.col_start, hb.col_end
+            );
+        }
+
+        assert!(output.hitboxes.len() >= 1);
+        let last_hb = output.hitboxes.last().unwrap();
+        assert!(
+            last_hb.col_end <= 15,
+            "Hitbox should not exceed line width"
+        );
+    }
+
+    #[test]
+    fn test_hitbox_second_line_wrapped_link() {
+        let doc = parse("First line\nSome text `[Click here`http://x]");
+        let output = render_document(&doc, 14, 0, &FormState::default(), None);
+
+        println!("Height: {}", output.height);
+        for (i, hb) in output.hitboxes.iter().enumerate() {
+            println!(
+                "Hitbox {}: line={}, col_start={}, col_end={}",
+                i, hb.line, hb.col_start, hb.col_end
+            );
+        }
+
+        assert_eq!(output.hitboxes.len(), 2, "Link should wrap into 2 hitboxes");
+
+        assert_eq!(
+            output.hitboxes[0].line, 1,
+            "First part of link on rendered line 1"
+        );
+        assert_eq!(output.hitboxes[0].col_start, 10);
+        assert_eq!(output.hitboxes[0].col_end, 14);
+
+        assert_eq!(
+            output.hitboxes[1].line, 2,
+            "Second part of link on rendered line 2"
+        );
+        assert_eq!(output.hitboxes[1].col_start, 0);
+        assert_eq!(output.hitboxes[1].col_end, 6);
     }
 }

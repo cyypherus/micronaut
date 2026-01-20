@@ -13,6 +13,7 @@ pub struct Hitbox {
     pub col_start: usize,
     pub col_end: usize,
     pub interactable: Interactable,
+    pub interactable_idx: usize,
 }
 
 #[derive(Debug, Clone)]

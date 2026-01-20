@@ -89,6 +89,22 @@ impl<R: Renderer> Browser<R> {
         self.url.as_deref()
     }
 
+    pub fn clear(&mut self) {
+        if let (Some(old_url), Some(old_content)) = (self.url.take(), self.content.take()) {
+            self.back_stack.push(HistoryEntry {
+                url: old_url,
+                content: old_content,
+                scroll: self.scroll,
+            });
+        }
+        self.scroll = 0;
+        self.hitboxes.clear();
+        self.content_height = 0;
+        self.cached_output = None;
+        self.render_dirty = false;
+        self.clear_form_state();
+    }
+
     fn clear_form_state(&mut self) {
         self.field_values.clear();
         self.checkbox_states.clear();
@@ -114,14 +130,17 @@ impl<R: Renderer> Browser<R> {
         };
 
         let doc = parse(content);
-        let selected = if self.hitboxes.is_empty() {
-            None
-        } else {
-            Some(self.selected)
-        };
-        let output =
-            self.renderer
-                .render(&doc, self.width, self.scroll, &self.form_state(), selected);
+        let selected_interactable = self
+            .hitboxes
+            .get(self.selected)
+            .map(|hb| hb.interactable_idx);
+        let output = self.renderer.render(
+            &doc,
+            self.width,
+            self.scroll,
+            &self.form_state(),
+            selected_interactable,
+        );
         self.hitboxes = output.hitboxes;
         self.content_height = output.height;
         self.cached_output = Some(output.content);
@@ -152,14 +171,17 @@ impl<R: Renderer> Browser<R> {
             return;
         };
         let doc = parse(content);
-        let selected = if self.hitboxes.is_empty() {
-            None
-        } else {
-            Some(self.selected)
-        };
-        let output =
-            self.renderer
-                .render(&doc, self.width, self.scroll, &self.form_state(), selected);
+        let selected_interactable = self
+            .hitboxes
+            .get(self.selected)
+            .map(|hb| hb.interactable_idx);
+        let output = self.renderer.render(
+            &doc,
+            self.width,
+            self.scroll,
+            &self.form_state(),
+            selected_interactable,
+        );
         self.cached_output = Some(output.content);
         self.render_dirty = false;
     }
@@ -394,6 +416,7 @@ mod tests {
             _selected: Option<usize>,
         ) -> RenderOutput<()> {
             let mut hitboxes = Vec::new();
+            let mut interactable_idx = 0usize;
             for (line_idx, line) in doc.lines.iter().enumerate() {
                 let mut col = 0;
                 for element in &line.elements {
@@ -408,7 +431,9 @@ mod tests {
                                     url: link.url.clone(),
                                     fields: link.fields.clone(),
                                 },
+                                interactable_idx,
                             });
+                            interactable_idx += 1;
                             col += len;
                         }
                         Element::Field(field) => {
@@ -432,7 +457,9 @@ mod tests {
                                 col_start: col,
                                 col_end: col + len,
                                 interactable,
+                                interactable_idx,
                             });
+                            interactable_idx += 1;
                             col += len;
                         }
                         Element::Text(t) => {

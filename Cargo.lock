@@ -577,6 +577,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "tui-input",
+ "unicode-width",
  "winnow",
 ]
 
