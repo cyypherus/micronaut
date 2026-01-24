@@ -352,7 +352,7 @@ impl<R: Renderer> Browser<R> {
 
         for spec in field_specs {
             if let Some((key, value)) = spec.split_once('=') {
-                data.insert(key.to_string(), value.to_string());
+                data.insert(format!("var_{}", key), value.to_string());
             } else if spec != "*" {
                 requested.push(spec);
             }
@@ -360,19 +360,19 @@ impl<R: Renderer> Browser<R> {
 
         for (name, value) in &self.field_values {
             if include_all || requested.iter().any(|f| f == name) {
-                data.insert(name.clone(), value.clone());
+                data.insert(format!("field_{}", name), value.clone());
             }
         }
 
         for (name, checked) in &self.checkbox_states {
             if *checked && (include_all || requested.iter().any(|f| f == name)) {
-                data.insert(name.clone(), "1".to_string());
+                data.insert(format!("field_{}", name), "1".to_string());
             }
         }
 
         for (name, value) in &self.radio_states {
             if include_all || requested.iter().any(|f| f == name) {
-                data.insert(name.clone(), value.clone());
+                data.insert(format!("field_{}", name), value.clone());
             }
         }
 
@@ -550,21 +550,17 @@ mod tests {
         let mut browser = Browser::new(NullRenderer);
         browser.set_content("/test", "`<?|agree|yes`I agree>");
 
-        assert!(
-            !form_state(&mut browser)
-                .checkboxes
-                .get("agree")
-                .copied()
-                .unwrap_or(false)
-        );
+        assert!(!form_state(&mut browser)
+            .checkboxes
+            .get("agree")
+            .copied()
+            .unwrap_or(false));
         browser.interact();
-        assert!(
-            form_state(&mut browser)
-                .checkboxes
-                .get("agree")
-                .copied()
-                .unwrap_or(false)
-        );
+        assert!(form_state(&mut browser)
+            .checkboxes
+            .get("agree")
+            .copied()
+            .unwrap_or(false));
     }
 
     #[test]
@@ -625,7 +621,7 @@ mod tests {
         browser.select_next();
         let interaction = browser.interact();
         if let Some(Interaction::Link(link)) = interaction {
-            assert_eq!(link.form_data.get("name"), Some(&"Alice".to_string()));
+            assert_eq!(link.form_data.get("field_name"), Some(&"Alice".to_string()));
         } else {
             panic!("Expected Link interaction");
         }
@@ -648,9 +644,9 @@ mod tests {
 
         if let Some(Interaction::Link(link)) = interaction {
             assert_eq!(link.url, "/send");
-            assert_eq!(link.form_data.get("user"), Some(&"A".to_string()));
-            assert_eq!(link.form_data.get("msg"), Some(&"B".to_string()));
-            assert_eq!(link.form_data.get("action"), Some(&"go".to_string()));
+            assert_eq!(link.form_data.get("field_user"), Some(&"A".to_string()));
+            assert_eq!(link.form_data.get("field_msg"), Some(&"B".to_string()));
+            assert_eq!(link.form_data.get("var_action"), Some(&"go".to_string()));
         } else {
             panic!("Expected Link interaction");
         }
@@ -811,9 +807,12 @@ This is the report content."#;
 
         if let Some(Interaction::Link(link)) = browser.interact() {
             assert_eq!(link.url, "/auth");
-            assert_eq!(link.form_data.get("username"), Some(&"alice".to_string()));
             assert_eq!(
-                link.form_data.get("password"),
+                link.form_data.get("field_username"),
+                Some(&"alice".to_string())
+            );
+            assert_eq!(
+                link.form_data.get("field_password"),
                 Some(&"secret123".to_string())
             );
         } else {
@@ -839,8 +838,8 @@ This is the report content."#;
         browser.select_next();
         if let Some(Interaction::Link(link)) = browser.interact() {
             assert_eq!(link.url, "/search");
-            assert_eq!(link.form_data.get("query"), Some(&"rust".to_string()));
-            assert_eq!(link.form_data.get("exact"), Some(&"1".to_string()));
+            assert_eq!(link.form_data.get("field_query"), Some(&"rust".to_string()));
+            assert_eq!(link.form_data.get("field_exact"), Some(&"1".to_string()));
         } else {
             panic!("Expected Link interaction");
         }
