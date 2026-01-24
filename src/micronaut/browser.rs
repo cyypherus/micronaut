@@ -11,8 +11,8 @@ struct HistoryEntry {
 }
 
 pub struct Browser<R: Renderer> {
-    url: Option<String>,
-    content: Option<String>,
+    pub url: Option<String>,
+    pub content: Option<String>,
     scroll: u16,
     back_stack: Vec<HistoryEntry>,
     forward_stack: Vec<HistoryEntry>,
@@ -390,10 +390,6 @@ impl<R: Renderer> Browser<R> {
             Interactable::Link { url, .. } => Some(url),
             _ => None,
         }
-    }
-
-    pub fn has_content(&self) -> bool {
-        self.content.is_some()
     }
 }
 
