@@ -373,40 +373,44 @@ fn render_normal_with_hitboxes(
         lines.push(RatLine::from(current_line_spans));
     }
 
-    let lines = if line.alignment != Alignment::Left {
-        lines
-            .into_iter()
-            .map(|l| align_line(l, content_width, line.alignment))
-            .collect()
-    } else {
-        lines
-    };
+    if line.alignment != Alignment::Left {
+        for (line_idx, rat_line) in lines.iter_mut().enumerate() {
+            let line_width: usize = rat_line
+                .spans
+                .iter()
+                .map(|s| s.content.chars().count())
+                .sum();
+            if line_width >= content_width {
+                continue;
+            }
+            let padding = content_width - line_width;
+            let left_pad = match line.alignment {
+                Alignment::Left => 0,
+                Alignment::Right => padding,
+                Alignment::Center => padding / 2,
+            };
+
+            if left_pad > 0 {
+                let mut new_spans = vec![Span::raw(" ".repeat(left_pad))];
+                new_spans.append(&mut rat_line.spans);
+                rat_line.spans = new_spans;
+
+                for hb in &mut hitboxes {
+                    if hb.line == row + line_idx {
+                        hb.col_start += left_pad;
+                        hb.col_end += left_pad;
+                    }
+                }
+            }
+
+            if line.alignment == Alignment::Center {
+                let right_pad = padding - left_pad;
+                rat_line.spans.push(Span::raw(" ".repeat(right_pad)));
+            }
+        }
+    }
 
     (lines, hitboxes)
-}
-
-fn align_line(line: RatLine<'static>, width: usize, alignment: Alignment) -> RatLine<'static> {
-    let line_width: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-    if line_width >= width {
-        return line;
-    }
-    let padding = width - line_width;
-    match alignment {
-        Alignment::Left => line,
-        Alignment::Right => {
-            let mut spans = vec![Span::raw(" ".repeat(padding))];
-            spans.extend(line.spans);
-            RatLine::from(spans)
-        }
-        Alignment::Center => {
-            let left_pad = padding / 2;
-            let right_pad = padding - left_pad;
-            let mut spans = vec![Span::raw(" ".repeat(left_pad))];
-            spans.extend(line.spans);
-            spans.push(Span::raw(" ".repeat(right_pad)));
-            RatLine::from(spans)
-        }
-    }
 }
 
 fn render_field(field: &Field, form_state: &FormState, selected: bool) -> Span<'static> {
