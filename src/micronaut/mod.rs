@@ -1,9 +1,11 @@
 mod ast;
 #[cfg(feature = "browser")]
 mod browser;
+mod builder;
 mod parser;
 #[cfg(feature = "ratatui")]
 mod ratatui;
+mod serialize;
 #[cfg(feature = "browser")]
 mod types;
 #[cfg(feature = "ratatui")]
@@ -18,7 +20,7 @@ pub use parser::parse;
 #[cfg(feature = "browser")]
 pub use browser::{Browser, Renderer};
 #[cfg(feature = "browser")]
-pub use types::{Interaction, Link, TextField};
+pub use types::{Interaction, Link, PartialInfo, TextField};
 
 #[cfg(feature = "ratatui")]
 pub use self::ratatui::RatatuiRenderer;

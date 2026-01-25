@@ -1,6 +1,8 @@
-use crate::micronaut::ast::Document;
+use crate::micronaut::ast::{Document, Element, Partial as AstPartial};
 use crate::micronaut::parser::parse;
-use crate::micronaut::types::{FormState, Hitbox, Interactable, Interaction, Link, TextField};
+use crate::micronaut::types::{
+    FormState, Hitbox, Interactable, Interaction, Link, PartialInfo, PartialState, TextField,
+};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -21,6 +23,7 @@ pub struct Browser<R: Renderer> {
     field_values: HashMap<String, String>,
     checkbox_states: HashMap<String, bool>,
     radio_states: HashMap<String, String>,
+    partials: HashMap<String, PartialState>,
     width: u16,
     height: u16,
     content_height: u16,
@@ -37,8 +40,20 @@ pub trait Renderer {
         width: u16,
         scroll: u16,
         form_state: &FormState,
+        partial_contents: &HashMap<String, String>,
         selected_interactable: Option<usize>,
     ) -> RenderOutput<Self::Output>;
+}
+
+fn compute_partial_id(partial: &AstPartial) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    partial.url.hash(&mut hasher);
+    partial.refresh.hash(&mut hasher);
+    partial.fields.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 pub struct RenderOutput<T> {
@@ -60,6 +75,7 @@ impl<R: Renderer> Browser<R> {
             field_values: HashMap::new(),
             checkbox_states: HashMap::new(),
             radio_states: HashMap::new(),
+            partials: HashMap::new(),
             width: 80,
             height: 24,
             content_height: 0,
@@ -109,6 +125,7 @@ impl<R: Renderer> Browser<R> {
         self.field_values.clear();
         self.checkbox_states.clear();
         self.radio_states.clear();
+        self.partials.clear();
         self.selected = 0;
     }
 
@@ -118,6 +135,13 @@ impl<R: Renderer> Browser<R> {
             checkboxes: self.checkbox_states.clone(),
             radios: self.radio_states.clone(),
         }
+    }
+
+    fn partial_contents(&self) -> HashMap<String, String> {
+        self.partials
+            .iter()
+            .filter_map(|(id, state)| state.content.as_ref().map(|c| (id.clone(), c.clone())))
+            .collect()
     }
 
     fn rebuild(&mut self) {
@@ -130,6 +154,8 @@ impl<R: Renderer> Browser<R> {
         };
 
         let doc = parse(content);
+        self.detect_partials(&doc);
+
         let selected_interactable = self
             .hitboxes
             .get(self.selected)
@@ -139,6 +165,7 @@ impl<R: Renderer> Browser<R> {
             self.width,
             self.scroll,
             &self.form_state(),
+            &self.partial_contents(),
             selected_interactable,
         );
         self.hitboxes = output.hitboxes;
@@ -166,6 +193,28 @@ impl<R: Renderer> Browser<R> {
         }
     }
 
+    fn detect_partials(&mut self, doc: &Document) {
+        for line in &doc.lines {
+            for element in &line.elements {
+                if let Element::Partial(partial) = element {
+                    let id = compute_partial_id(partial);
+                    self.partials
+                        .entry(id.clone())
+                        .or_insert_with(|| PartialState {
+                            info: PartialInfo {
+                                id,
+                                url: partial.url.clone(),
+                                refresh: partial.refresh,
+                                fields: partial.fields.clone(),
+                            },
+                            content: None,
+                            last_updated_secs: None,
+                        });
+                }
+            }
+        }
+    }
+
     fn rerender(&mut self) {
         let Some(ref content) = self.content else {
             return;
@@ -180,6 +229,7 @@ impl<R: Renderer> Browser<R> {
             self.width,
             self.scroll,
             &self.form_state(),
+            &self.partial_contents(),
             selected_interactable,
         );
         self.cached_output = Some(output.content);
@@ -300,11 +350,18 @@ impl<R: Renderer> Browser<R> {
         let hitbox = self.hitboxes.get(self.selected)?;
 
         match &hitbox.interactable {
-            Interactable::Link { url, fields } => Some(Interaction::Link(Link {
-                url: url.clone(),
-                fields: fields.clone(),
-                form_data: self.collect_form_data(fields),
-            })),
+            Interactable::Link { url, fields } => {
+                if let Some(rest) = url.strip_prefix("p:") {
+                    let partial_ids: Vec<String> = rest.split(':').map(|s| s.to_string()).collect();
+                    Some(Interaction::RefreshPartials(partial_ids))
+                } else {
+                    Some(Interaction::Link(Link {
+                        url: url.clone(),
+                        fields: fields.clone(),
+                        form_data: self.collect_form_data(fields),
+                    }))
+                }
+            }
             Interactable::TextField { name, masked, .. } => {
                 let value = self.field_values.get(name).cloned().unwrap_or_default();
                 Some(Interaction::EditField(TextField {
@@ -391,6 +448,65 @@ impl<R: Renderer> Browser<R> {
             _ => None,
         }
     }
+
+    pub fn selected_link_fields(&self) -> Option<Vec<(&str, String)>> {
+        let hitbox = self.hitboxes.get(self.selected)?;
+        match &hitbox.interactable {
+            Interactable::Link { fields, .. } if !fields.is_empty() => {
+                let mut result = Vec::new();
+                for spec in fields {
+                    if let Some((key, value)) = spec.split_once('=') {
+                        result.push((key, value.to_string()));
+                    } else if spec != "*" {
+                        let value = self
+                            .field_values
+                            .get(spec)
+                            .or_else(|| self.radio_states.get(spec))
+                            .cloned()
+                            .or_else(|| {
+                                self.checkbox_states
+                                    .get(spec)
+                                    .map(|&c| if c { "1" } else { "0" }.to_string())
+                            })
+                            .unwrap_or_default();
+                        result.push((spec.as_str(), value));
+                    }
+                }
+                Some(result)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn partials_needing_update(&self, now_secs: u64) -> Vec<PartialInfo> {
+        self.partials
+            .values()
+            .filter(
+                |state| match (state.last_updated_secs, state.info.refresh) {
+                    (None, _) => true,
+                    (Some(updated), Some(refresh)) => now_secs >= updated + refresh as u64,
+                    (Some(_), None) => false,
+                },
+            )
+            .map(|state| state.info.clone())
+            .collect()
+    }
+
+    pub fn set_partial_content(&mut self, partial: &PartialInfo, content: String, now_secs: u64) {
+        if let Some(state) = self.partials.get_mut(&partial.id) {
+            state.content = Some(content);
+            state.last_updated_secs = Some(now_secs);
+            self.render_dirty = true;
+        }
+    }
+
+    pub fn partial_form_data(&self, partial: &PartialInfo) -> HashMap<String, String> {
+        self.collect_form_data(&partial.fields)
+    }
+
+    pub fn has_partials(&self) -> bool {
+        !self.partials.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -409,6 +525,7 @@ mod tests {
             _width: u16,
             _scroll: u16,
             _form_state: &FormState,
+            _partial_contents: &HashMap<String, String>,
             _selected: Option<usize>,
         ) -> RenderOutput<()> {
             let mut hitboxes = Vec::new();
@@ -485,7 +602,7 @@ mod tests {
     #[test]
     fn initial_state() {
         let browser = Browser::new(NullRenderer);
-        assert!(!browser.has_content());
+        assert!(browser.content.is_none());
         assert!(browser.url().is_none());
         assert!(!browser.can_go_back());
         assert!(!browser.can_go_forward());
@@ -546,17 +663,21 @@ mod tests {
         let mut browser = Browser::new(NullRenderer);
         browser.set_content("/test", "`<?|agree|yes`I agree>");
 
-        assert!(!form_state(&mut browser)
-            .checkboxes
-            .get("agree")
-            .copied()
-            .unwrap_or(false));
+        assert!(
+            !form_state(&mut browser)
+                .checkboxes
+                .get("agree")
+                .copied()
+                .unwrap_or(false)
+        );
         browser.interact();
-        assert!(form_state(&mut browser)
-            .checkboxes
-            .get("agree")
-            .copied()
-            .unwrap_or(false));
+        assert!(
+            form_state(&mut browser)
+                .checkboxes
+                .get("agree")
+                .copied()
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -846,7 +967,7 @@ This is the report content."#;
         let mut browser = Browser::new(NullRenderer);
         browser.set_content("/empty", "");
 
-        assert!(browser.has_content());
+        assert!(browser.content.is_some());
         assert!(browser.render().is_some());
         assert!(browser.selected_link().is_none());
 
