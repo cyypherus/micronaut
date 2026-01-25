@@ -11,6 +11,18 @@ impl Document {
     pub fn push(&mut self, line: Line) {
         self.lines.push(line);
     }
+
+    pub fn push_text(&mut self, text: &str) {
+        for line_text in text.lines() {
+            self.lines.push(Line::normal().text(line_text));
+        }
+    }
+
+    pub fn push_styled(&mut self, text: &str, style: Style) {
+        for line_text in text.lines() {
+            self.lines.push(Line::normal().styled(line_text, style));
+        }
+    }
 }
 
 impl Default for Document {
@@ -342,5 +354,16 @@ mod tests {
         );
 
         assert_eq!(doc.to_string(), "Name: `<20|username`guest>");
+    }
+
+    #[test]
+    fn build_multiline_ascii() {
+        let mut doc = Document::new();
+        doc.push_styled(
+            " /\\_/\\\n( o.o )\n > ^ <",
+            Style::new().fg(Color::hex(0x00FF00)),
+        );
+
+        assert_eq!(doc.to_string(), "`F0f0 /\\\\_/\\\\\n( o.o )\n > ^ <");
     }
 }

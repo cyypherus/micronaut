@@ -24,3 +24,6 @@ path = "src/lib.rs"
 [[example]]
 name = "render"
 required-features = ["ratatui"]
+
+[[example]]
+name = "builder"
