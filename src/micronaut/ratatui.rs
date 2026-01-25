@@ -373,7 +373,40 @@ fn render_normal_with_hitboxes(
         lines.push(RatLine::from(current_line_spans));
     }
 
+    let lines = if line.alignment != Alignment::Left {
+        lines
+            .into_iter()
+            .map(|l| align_line(l, content_width, line.alignment))
+            .collect()
+    } else {
+        lines
+    };
+
     (lines, hitboxes)
+}
+
+fn align_line(line: RatLine<'static>, width: usize, alignment: Alignment) -> RatLine<'static> {
+    let line_width: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+    if line_width >= width {
+        return line;
+    }
+    let padding = width - line_width;
+    match alignment {
+        Alignment::Left => line,
+        Alignment::Right => {
+            let mut spans = vec![Span::raw(" ".repeat(padding))];
+            spans.extend(line.spans);
+            RatLine::from(spans)
+        }
+        Alignment::Center => {
+            let left_pad = padding / 2;
+            let right_pad = padding - left_pad;
+            let mut spans = vec![Span::raw(" ".repeat(left_pad))];
+            spans.extend(line.spans);
+            spans.push(Span::raw(" ".repeat(right_pad)));
+            RatLine::from(spans)
+        }
+    }
 }
 
 fn render_field(field: &Field, form_state: &FormState, selected: bool) -> Span<'static> {
