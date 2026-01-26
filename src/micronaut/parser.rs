@@ -248,6 +248,9 @@ fn parse_elements_inner<'a>(input: &mut Stream<'a>, pre_escape: bool) -> ModalRe
 
                 if let Ok(elem) = parse_backtick_sequence(input) {
                     if let Some(e) = elem {
+                        if input.state.first_text_alignment.is_none() {
+                            input.state.first_text_alignment = Some(input.state.alignment);
+                        }
                         elements.push(e);
                     }
                     continue;

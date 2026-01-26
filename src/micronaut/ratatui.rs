@@ -323,14 +323,18 @@ fn render_normal_with_hitboxes(
         }
     }
 
+    let total_content_width: usize = wrapped_spans.iter().map(|ws| ws.text.width()).sum();
+    let left_pad = compute_left_pad(line.alignment, content_width, total_content_width);
+
     let mut lines: Vec<RatLine<'static>> = Vec::new();
     let mut hitboxes: Vec<Hitbox> = Vec::new();
     let mut current_line_spans: Vec<Span<'static>> = Vec::new();
     let mut current_col = 0usize;
     let mut current_row = row;
 
-    if indent > 0 {
-        current_line_spans.push(Span::raw(" ".repeat(indent as usize)));
+    let line_start_pad = indent as usize + left_pad;
+    if line_start_pad > 0 {
+        current_line_spans.push(Span::raw(" ".repeat(line_start_pad)));
     }
 
     for ws in wrapped_spans {
@@ -356,8 +360,8 @@ fn render_normal_with_hitboxes(
             if let Some((idx, ref interactable)) = ws.interactable {
                 hitboxes.push(Hitbox {
                     line: current_row,
-                    col_start: current_col + indent as usize,
-                    col_end: current_col + indent as usize + chunk_width,
+                    col_start: current_col + line_start_pad,
+                    col_end: current_col + line_start_pad + chunk_width,
                     interactable: interactable.clone(),
                     interactable_idx: idx,
                 });
@@ -371,43 +375,6 @@ fn render_normal_with_hitboxes(
 
     if !current_line_spans.is_empty() || (current_line_spans.is_empty() && lines.is_empty()) {
         lines.push(RatLine::from(current_line_spans));
-    }
-
-    if line.alignment != Alignment::Left {
-        for (line_idx, rat_line) in lines.iter_mut().enumerate() {
-            let line_width: usize = rat_line
-                .spans
-                .iter()
-                .map(|s| s.content.chars().count())
-                .sum();
-            if line_width >= content_width {
-                continue;
-            }
-            let padding = content_width - line_width;
-            let left_pad = match line.alignment {
-                Alignment::Left => 0,
-                Alignment::Right => padding,
-                Alignment::Center => padding / 2,
-            };
-
-            if left_pad > 0 {
-                let mut new_spans = vec![Span::raw(" ".repeat(left_pad))];
-                new_spans.append(&mut rat_line.spans);
-                rat_line.spans = new_spans;
-
-                for hb in &mut hitboxes {
-                    if hb.line == row + line_idx {
-                        hb.col_start += left_pad;
-                        hb.col_end += left_pad;
-                    }
-                }
-            }
-
-            if line.alignment == Alignment::Center {
-                let right_pad = padding - left_pad;
-                rat_line.spans.push(Span::raw(" ".repeat(right_pad)));
-            }
-        }
     }
 
     (lines, hitboxes)
@@ -488,21 +455,26 @@ fn take_by_width(chars: &[char], max_width: usize) -> (String, usize) {
     (result, width)
 }
 
+fn compute_left_pad(alignment: Alignment, available: usize, content: usize) -> usize {
+    if content >= available {
+        return 0;
+    }
+    let padding = available - content;
+    match alignment {
+        Alignment::Left => 0,
+        Alignment::Right => padding,
+        Alignment::Center => padding / 2,
+    }
+}
+
 fn pad_to_width(text: &str, width: usize, alignment: Alignment) -> String {
     let text_width = text.width();
     if text_width >= width {
         return text.to_string();
     }
-    let padding = width - text_width;
-    match alignment {
-        Alignment::Left => format!("{}{}", text, " ".repeat(padding)),
-        Alignment::Right => format!("{}{}", " ".repeat(padding), text),
-        Alignment::Center => {
-            let left = padding / 2;
-            let right = padding - left;
-            format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
-        }
-    }
+    let left = compute_left_pad(alignment, width, text_width);
+    let right = width - text_width - left;
+    format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
 }
 
 #[cfg(test)]
@@ -688,5 +660,20 @@ mod tests {
             has_text_field,
             "Should have a TextField hitbox for username"
         );
+    }
+
+    #[test]
+    fn test_centered_link() {
+        let doc = parse("`c`[Interface Directory`http://x]");
+        let output = render_document(&doc, 40, 0, &FormState::default(), &no_partials(), None);
+
+        assert_eq!(output.hitboxes.len(), 1);
+        let hb = &output.hitboxes[0];
+
+        let link_len = "Interface Directory".len();
+        let expected_left_pad = (40 - link_len) / 2;
+
+        assert_eq!(hb.col_start, expected_left_pad);
+        assert_eq!(hb.col_end, expected_left_pad + link_len);
     }
 }
