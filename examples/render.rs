@@ -1,10 +1,13 @@
 use std::io::{self, stdout};
+use std::path::PathBuf;
+use std::sync::mpsc;
 
 use crossterm::{
     ExecutableCommand,
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::{
     buffer::Buffer,
     prelude::*,
@@ -80,10 +83,27 @@ impl<'a> Modal<'a> {
 }
 
 fn main() -> io::Result<()> {
-    let content = std::env::args()
-        .nth(1)
-        .map(|path| std::fs::read_to_string(&path).expect("Failed to read file"))
+    let file_path: Option<PathBuf> = std::env::args().nth(1).map(PathBuf::from);
+    let content = file_path
+        .as_ref()
+        .map(|p| std::fs::read_to_string(p).expect("Failed to read file"))
         .unwrap_or_else(|| include_str!("../tests/example.mu").to_string());
+
+    let (watch_tx, watch_rx) = mpsc::channel();
+    let _watcher: Option<RecommendedWatcher> = file_path.as_ref().and_then(|path| {
+        let tx = watch_tx.clone();
+        let mut watcher =
+            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res
+                    && event.kind.is_modify()
+                {
+                    let _ = tx.send(());
+                }
+            })
+            .ok()?;
+        watcher.watch(path, RecursiveMode::NonRecursive).ok()?;
+        Some(watcher)
+    });
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -91,7 +111,11 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     let mut browser = Browser::new(RatatuiRenderer);
-    browser.set_content("file://example.mu", &content);
+    let url = file_path
+        .as_ref()
+        .map(|p| format!("file://{}", p.display()))
+        .unwrap_or_else(|| "file://example.mu".to_string());
+    browser.set_content(&url, &content);
     let mut mode = Mode::Browse;
     let mut input = Input::default();
     let mut button_rects: Vec<Rect> = Vec::new();
@@ -183,6 +207,13 @@ fn main() -> io::Result<()> {
             }
         })?;
 
+        if watch_rx.try_recv().is_ok()
+            && let Some(ref path) = file_path
+            && let Ok(new_content) = std::fs::read_to_string(path)
+        {
+            browser.set_content(&url, &new_content);
+        }
+
         while event::poll(std::time::Duration::from_millis(0))? {
             let evt = event::read()?;
             match &mode {
@@ -204,6 +235,7 @@ fn main() -> io::Result<()> {
                                             masked: field.masked,
                                         };
                                     }
+                                    Interaction::RefreshPartials(_) => {}
                                 }
                             }
                         }
@@ -223,6 +255,7 @@ fn main() -> io::Result<()> {
                                             masked: field.masked,
                                         };
                                     }
+                                    Interaction::RefreshPartials(_) => {}
                                 }
                             }
                         }

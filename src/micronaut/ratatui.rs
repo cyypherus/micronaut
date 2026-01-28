@@ -1,14 +1,57 @@
 use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
 use ratatui::text::{Line as RatLine, Span, Text};
 use ratatui::widgets::Paragraph;
+use std::collections::HashMap;
 use unicode_width::UnicodeWidthStr;
 
 use crate::micronaut::ast::*;
 use crate::micronaut::browser::{RenderOutput, Renderer};
+use crate::micronaut::parser::parse;
 use crate::micronaut::types::{FormState, Hitbox, Interactable};
 
 const SECTION_INDENT: u16 = 2;
 const DEFAULT_FIELD_WIDTH: u16 = 24;
+
+fn compute_partial_id(partial: &Partial) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    partial.url.hash(&mut hasher);
+    partial.refresh.hash(&mut hasher);
+    partial.fields.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn render_partial_content(
+    doc: &Document,
+    start_row: usize,
+    width: u16,
+    form_state: &FormState,
+    partial_contents: &HashMap<String, String>,
+    selected_interactable: Option<usize>,
+    interactable_idx: &mut usize,
+) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
+    let mut lines: Vec<RatLine> = Vec::new();
+    let mut hitboxes: Vec<Hitbox> = Vec::new();
+
+    for line in &doc.lines {
+        let row = start_row + lines.len();
+        let (rendered, mut hits) = render_line_with_hitboxes(
+            line,
+            row,
+            width,
+            form_state,
+            partial_contents,
+            selected_interactable,
+            interactable_idx,
+        );
+        lines.extend(rendered);
+        hitboxes.append(&mut hits);
+    }
+
+    (lines, hitboxes)
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct RatatuiRenderer;
@@ -22,9 +65,17 @@ impl Renderer for RatatuiRenderer {
         width: u16,
         scroll: u16,
         form_state: &FormState,
+        partial_contents: &HashMap<String, String>,
         selected_interactable: Option<usize>,
     ) -> RenderOutput<Self::Output> {
-        render_document(doc, width, scroll, form_state, selected_interactable)
+        render_document(
+            doc,
+            width,
+            scroll,
+            form_state,
+            partial_contents,
+            selected_interactable,
+        )
     }
 }
 
@@ -33,6 +84,7 @@ fn render_document(
     width: u16,
     scroll: u16,
     form_state: &FormState,
+    partial_contents: &HashMap<String, String>,
     selected_interactable: Option<usize>,
 ) -> RenderOutput<Paragraph<'static>> {
     let mut lines: Vec<RatLine> = Vec::new();
@@ -46,6 +98,7 @@ fn render_document(
             row,
             width,
             form_state,
+            partial_contents,
             selected_interactable,
             &mut interactable_idx,
         );
@@ -113,6 +166,7 @@ fn render_line_with_hitboxes(
     row: usize,
     width: u16,
     form_state: &FormState,
+    partial_contents: &HashMap<String, String>,
     selected_interactable: Option<usize>,
     interactable_idx: &mut usize,
 ) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
@@ -125,6 +179,7 @@ fn render_line_with_hitboxes(
             row,
             width,
             form_state,
+            partial_contents,
             selected_interactable,
             interactable_idx,
         ),
@@ -175,6 +230,7 @@ fn render_normal_with_hitboxes(
     row: usize,
     width: u16,
     form_state: &FormState,
+    partial_contents: &HashMap<String, String>,
     selected_interactable: Option<usize>,
     interactable_idx: &mut usize,
 ) -> (Vec<RatLine<'static>>, Vec<Hitbox>) {
@@ -243,14 +299,32 @@ fn render_normal_with_hitboxes(
                 });
             }
             Element::Partial(partial) => {
-                wrapped_spans.push(WrappedSpan {
-                    text: format!("[partial:{}]", partial.url),
-                    style: RatStyle::default(),
-                    interactable: None,
-                });
+                let partial_id = compute_partial_id(partial);
+                if let Some(content) = partial_contents.get(&partial_id) {
+                    let partial_doc = parse(content);
+                    let (partial_lines, partial_hitboxes) = render_partial_content(
+                        &partial_doc,
+                        row,
+                        width,
+                        form_state,
+                        partial_contents,
+                        selected_interactable,
+                        interactable_idx,
+                    );
+                    return (partial_lines, partial_hitboxes);
+                } else {
+                    wrapped_spans.push(WrappedSpan {
+                        text: "\u{29D6}".to_string(),
+                        style: RatStyle::default().fg(RatColor::DarkGray),
+                        interactable: None,
+                    });
+                }
             }
         }
     }
+
+    let total_content_width: usize = wrapped_spans.iter().map(|ws| ws.text.width()).sum();
+    let left_pad = compute_left_pad(line.alignment, content_width, total_content_width);
 
     let mut lines: Vec<RatLine<'static>> = Vec::new();
     let mut hitboxes: Vec<Hitbox> = Vec::new();
@@ -258,8 +332,9 @@ fn render_normal_with_hitboxes(
     let mut current_col = 0usize;
     let mut current_row = row;
 
-    if indent > 0 {
-        current_line_spans.push(Span::raw(" ".repeat(indent as usize)));
+    let line_start_pad = indent as usize + left_pad;
+    if line_start_pad > 0 {
+        current_line_spans.push(Span::raw(" ".repeat(line_start_pad)));
     }
 
     for ws in wrapped_spans {
@@ -279,15 +354,14 @@ fn render_normal_with_hitboxes(
                 continue;
             }
 
-            let (chunk, chunk_width) =
-                take_by_width(&chars[char_idx..], remaining_width);
+            let (chunk, chunk_width) = take_by_width(&chars[char_idx..], remaining_width);
             let chars_taken = chunk.chars().count();
 
             if let Some((idx, ref interactable)) = ws.interactable {
                 hitboxes.push(Hitbox {
                     line: current_row,
-                    col_start: current_col + indent as usize,
-                    col_end: current_col + indent as usize + chunk_width,
+                    col_start: current_col + line_start_pad,
+                    col_end: current_col + line_start_pad + chunk_width,
                     interactable: interactable.clone(),
                     interactable_idx: idx,
                 });
@@ -381,21 +455,26 @@ fn take_by_width(chars: &[char], max_width: usize) -> (String, usize) {
     (result, width)
 }
 
+fn compute_left_pad(alignment: Alignment, available: usize, content: usize) -> usize {
+    if content >= available {
+        return 0;
+    }
+    let padding = available - content;
+    match alignment {
+        Alignment::Left => 0,
+        Alignment::Right => padding,
+        Alignment::Center => padding / 2,
+    }
+}
+
 fn pad_to_width(text: &str, width: usize, alignment: Alignment) -> String {
     let text_width = text.width();
     if text_width >= width {
         return text.to_string();
     }
-    let padding = width - text_width;
-    match alignment {
-        Alignment::Left => format!("{}{}", text, " ".repeat(padding)),
-        Alignment::Right => format!("{}{}", " ".repeat(padding), text),
-        Alignment::Center => {
-            let left = padding / 2;
-            let right = padding - left;
-            format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
-        }
-    }
+    let left = compute_left_pad(alignment, width, text_width);
+    let right = width - text_width - left;
+    format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
 }
 
 #[cfg(test)]
@@ -403,14 +482,14 @@ mod tests {
     use super::*;
     use crate::micronaut::parse;
 
-    fn render(doc: &Document, width: u16, scroll: u16) -> Paragraph<'static> {
-        render_document(doc, width, scroll, &FormState::default(), None).content
+    fn no_partials() -> HashMap<String, String> {
+        HashMap::new()
     }
 
     #[test]
     fn test_hitbox_positions_simple() {
         let doc = parse("Hello `[Link`http://x]");
-        let output = render_document(&doc, 80, 0, &FormState::default(), None);
+        let output = render_document(&doc, 80, 0, &FormState::default(), &no_partials(), None);
         assert_eq!(output.hitboxes.len(), 1);
         let hb = &output.hitboxes[0];
         assert_eq!(hb.line, 0);
@@ -421,7 +500,7 @@ mod tests {
     #[test]
     fn test_hitbox_wrapped_link() {
         let doc = parse("Some text `[Click here now`http://x]");
-        let output = render_document(&doc, 18, 0, &FormState::default(), None);
+        let output = render_document(&doc, 18, 0, &FormState::default(), &no_partials(), None);
         assert_eq!(
             output.hitboxes.len(),
             2,
@@ -440,7 +519,7 @@ mod tests {
     #[test]
     fn test_hitbox_after_emoji() {
         let doc = parse("🦀 `[Go`http://x]");
-        let output = render_document(&doc, 80, 0, &FormState::default(), None);
+        let output = render_document(&doc, 80, 0, &FormState::default(), &no_partials(), None);
         assert_eq!(output.hitboxes.len(), 1);
         let hb = &output.hitboxes[0];
         assert_eq!(hb.col_start, 3, "emoji is 2 cols wide + 1 space = col 3");
@@ -450,7 +529,7 @@ mod tests {
     #[test]
     fn test_hitbox_link_starts_on_wrapped_line() {
         let doc = parse("0123456789`[Link`http://x]");
-        let output = render_document(&doc, 10, 0, &FormState::default(), None);
+        let output = render_document(&doc, 10, 0, &FormState::default(), &no_partials(), None);
 
         assert_eq!(output.height, 2, "Should be 2 lines");
         assert_eq!(output.hitboxes.len(), 1);
@@ -463,7 +542,7 @@ mod tests {
     #[test]
     fn test_hitbox_link_wraps_at_exact_boundary() {
         let doc = parse("12345`[ABCDE`http://x]");
-        let output = render_document(&doc, 10, 0, &FormState::default(), None);
+        let output = render_document(&doc, 10, 0, &FormState::default(), &no_partials(), None);
 
         assert_eq!(output.height, 1, "Should be 1 line (exactly 10 chars)");
         assert_eq!(output.hitboxes.len(), 1, "Link fits on first line, no wrap");
@@ -476,7 +555,7 @@ mod tests {
     #[test]
     fn test_hitbox_link_wraps_one_char_over() {
         let doc = parse("12345`[ABCDEF`http://x]");
-        let output = render_document(&doc, 10, 0, &FormState::default(), None);
+        let output = render_document(&doc, 10, 0, &FormState::default(), &no_partials(), None);
 
         assert_eq!(output.height, 2, "Should be 2 lines");
         assert_eq!(
@@ -497,7 +576,7 @@ mod tests {
     #[test]
     fn test_hitbox_multiple_lines_before_link() {
         let doc = parse("Line one here.\nSecond line. `[Link`http://x]");
-        let output = render_document(&doc, 80, 0, &FormState::default(), None);
+        let output = render_document(&doc, 80, 0, &FormState::default(), &no_partials(), None);
 
         assert_eq!(output.hitboxes.len(), 1);
         let hb = &output.hitboxes[0];
@@ -509,7 +588,7 @@ mod tests {
     #[test]
     fn test_hitbox_wrapped_text_then_link() {
         let doc = parse("This is a long line of text `[Link`http://x]");
-        let output = render_document(&doc, 15, 0, &FormState::default(), None);
+        let output = render_document(&doc, 15, 0, &FormState::default(), &no_partials(), None);
 
         println!("Height: {}", output.height);
         for (i, hb) in output.hitboxes.iter().enumerate() {
@@ -521,16 +600,13 @@ mod tests {
 
         assert!(output.hitboxes.len() >= 1);
         let last_hb = output.hitboxes.last().unwrap();
-        assert!(
-            last_hb.col_end <= 15,
-            "Hitbox should not exceed line width"
-        );
+        assert!(last_hb.col_end <= 15, "Hitbox should not exceed line width");
     }
 
     #[test]
     fn test_hitbox_second_line_wrapped_link() {
         let doc = parse("First line\nSome text `[Click here`http://x]");
-        let output = render_document(&doc, 14, 0, &FormState::default(), None);
+        let output = render_document(&doc, 14, 0, &FormState::default(), &no_partials(), None);
 
         println!("Height: {}", output.height);
         for (i, hb) in output.hitboxes.iter().enumerate() {
@@ -555,5 +631,49 @@ mod tests {
         );
         assert_eq!(output.hitboxes[1].col_start, 0);
         assert_eq!(output.hitboxes[1].col_end, 6);
+    }
+
+    #[test]
+    fn test_field_renders_with_visible_content() {
+        let content = "`<20|username`Guest_ccbc>`[Submit`:/page/test.mu`username]";
+        let doc = parse(content);
+        let form_state = FormState::default();
+        let output = render_document(&doc, 80, 0, &form_state, &no_partials(), None);
+
+        println!("Hitboxes: {:?}", output.hitboxes.len());
+        for hb in &output.hitboxes {
+            println!(
+                "  Hitbox: line={}, cols={}-{}, interactable={:?}",
+                hb.line, hb.col_start, hb.col_end, hb.interactable
+            );
+        }
+
+        assert!(
+            output.hitboxes.len() >= 2,
+            "Should have hitbox for field and link"
+        );
+
+        let has_text_field = output.hitboxes.iter().any(|hb| {
+            matches!(&hb.interactable, Interactable::TextField { name, .. } if name == "username")
+        });
+        assert!(
+            has_text_field,
+            "Should have a TextField hitbox for username"
+        );
+    }
+
+    #[test]
+    fn test_centered_link() {
+        let doc = parse("`c`[Interface Directory`http://x]");
+        let output = render_document(&doc, 40, 0, &FormState::default(), &no_partials(), None);
+
+        assert_eq!(output.hitboxes.len(), 1);
+        let hb = &output.hitboxes[0];
+
+        let link_len = "Interface Directory".len();
+        let expected_left_pad = (40 - link_len) / 2;
+
+        assert_eq!(hb.col_start, expected_left_pad);
+        assert_eq!(hb.col_end, expected_left_pad + link_len);
     }
 }

@@ -248,6 +248,9 @@ fn parse_elements_inner<'a>(input: &mut Stream<'a>, pre_escape: bool) -> ModalRe
 
                 if let Ok(elem) = parse_backtick_sequence(input) {
                     if let Some(e) = elem {
+                        if input.state.first_text_alignment.is_none() {
+                            input.state.first_text_alignment = Some(input.state.alignment);
+                        }
                         elements.push(e);
                     }
                     continue;
@@ -1655,4 +1658,42 @@ fn test_file_list_with_color_underline_link() {
         })
         .expect("Should have a link");
     assert_eq!(link.url, ":/file/Baby_Got_Back.mp3");
+}
+
+#[test]
+fn test_user_form_fields() {
+    let content = "`<20|username`Guest_ccbc>`[Submit`:/page/test.mu`username]";
+    let doc = parse(content);
+    println!("Lines: {}", doc.lines.len());
+    println!("Elements: {}", doc.lines[0].elements.len());
+    for (i, elem) in doc.lines[0].elements.iter().enumerate() {
+        println!("  Element {}: {:?}", i, elem);
+    }
+    assert!(matches!(&doc.lines[0].elements[0], Element::Field(_)));
+    assert!(matches!(&doc.lines[0].elements[1], Element::Link(_)));
+}
+
+#[test]
+fn test_exact_user_content() {
+    let content = "`B317 Nickname: `Baac`F000`<20|username`Guest_ccbc>`b`f";
+    let doc = parse(content);
+    println!("Lines: {}", doc.lines.len());
+    println!("Elements: {}", doc.lines[0].elements.len());
+    for (i, elem) in doc.lines[0].elements.iter().enumerate() {
+        match elem {
+            Element::Text(t) => println!("  Element {}: Text({:?})", i, t.text),
+            Element::Field(f) => println!(
+                "  Element {}: Field(name={}, default={}, width={:?})",
+                i, f.name, f.default, f.width
+            ),
+            Element::Link(l) => println!("  Element {}: Link({})", i, l.url),
+            _ => println!("  Element {}: {:?}", i, elem),
+        }
+    }
+    // Check for field
+    let has_field = doc.lines[0]
+        .elements
+        .iter()
+        .any(|e| matches!(e, Element::Field(_)));
+    assert!(has_field, "Should have a field element");
 }

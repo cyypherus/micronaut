@@ -15,6 +15,7 @@ winnow = "0.7"
 
 [dev-dependencies]
 crossterm = "0.29"
+notify = "8.2.0"
 tui-input = "0.12"
 
 [lib]
@@ -23,3 +24,6 @@ path = "src/lib.rs"
 [[example]]
 name = "render"
 required-features = ["ratatui"]
+
+[[example]]
+name = "builder"

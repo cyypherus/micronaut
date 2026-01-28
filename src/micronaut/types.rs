@@ -7,6 +7,21 @@ pub struct FormState {
     pub radios: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PartialInfo {
+    pub(crate) id: String,
+    pub url: String,
+    pub refresh: Option<u32>,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PartialState {
+    pub info: PartialInfo,
+    pub content: Option<String>,
+    pub last_updated_secs: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Hitbox {
     pub line: usize,
@@ -54,4 +69,5 @@ pub struct TextField {
 pub enum Interaction {
     Link(Link),
     EditField(TextField),
+    RefreshPartials(Vec<String>),
 }
