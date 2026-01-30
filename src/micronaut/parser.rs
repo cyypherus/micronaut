@@ -283,7 +283,6 @@ fn parse_backtick_sequence<'a>(input: &mut Stream<'a>) -> ModalResult<Option<Ele
     let _ = '`'.parse_next(input)?;
 
     if input.input.is_empty() {
-        input.state.reset_style();
         return Ok(None);
     }
 
@@ -1696,4 +1695,22 @@ fn test_exact_user_content() {
         .iter()
         .any(|e| matches!(e, Element::Field(_)));
     assert!(has_field, "Should have a field element");
+}
+
+#[test]
+fn test_alignment_persists_to_link_lines() {
+    let doc = parse("`ctext\n`[Link`/a]");
+    assert_eq!(doc.lines[0].alignment, Alignment::Center, "line with text");
+    assert_eq!(doc.lines[1].alignment, Alignment::Center, "line with link");
+}
+
+#[test]
+fn test_alignment_persists_through_format_only_lines() {
+    let doc = parse("`F8ff`B222`c\n\n`[Link`/a]");
+    assert_eq!(doc.lines.len(), 3);
+    assert_eq!(
+        doc.lines[2].alignment,
+        Alignment::Center,
+        "link after format-only line"
+    );
 }

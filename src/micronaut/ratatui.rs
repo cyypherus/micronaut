@@ -676,4 +676,48 @@ mod tests {
         assert_eq!(hb.col_start, expected_left_pad);
         assert_eq!(hb.col_end, expected_left_pad + link_len);
     }
+
+    #[test]
+    fn test_centered_link_after_format_line() {
+        let doc = parse("`F8ff`c\n`[Link`/a]");
+        assert_eq!(
+            doc.lines[1].alignment,
+            Alignment::Center,
+            "parser should set center"
+        );
+
+        let output = render_document(&doc, 40, 0, &FormState::default(), &no_partials(), None);
+        assert_eq!(output.hitboxes.len(), 1);
+
+        let hb = &output.hitboxes[0];
+        let link_len = "Link".len();
+        let expected_pad = (40 - link_len) / 2;
+
+        assert_eq!(
+            hb.col_start, expected_pad,
+            "link should be centered at col {}, got {}",
+            expected_pad, hb.col_start
+        );
+    }
+
+    #[test]
+    fn test_centered_ascii_art_links() {
+        let input = "`F8ff`B222`c\n\n\n`[####`/a]`\n`[####`/b]`";
+        let doc = parse(input);
+        for (i, line) in doc.lines.iter().enumerate() {
+            eprintln!(
+                "line {}: alignment={:?} elements={}",
+                i,
+                line.alignment,
+                line.elements.len()
+            );
+        }
+        assert_eq!(doc.lines[3].alignment, Alignment::Center, "first art line");
+        assert_eq!(doc.lines[4].alignment, Alignment::Center, "second art line");
+
+        let output = render_document(&doc, 80, 0, &FormState::default(), &no_partials(), None);
+        let hb = &output.hitboxes[0];
+        let expected_pad = (80 - 4) / 2;
+        assert_eq!(hb.col_start, expected_pad, "first link should be centered");
+    }
 }
