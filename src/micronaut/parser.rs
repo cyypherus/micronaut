@@ -172,6 +172,9 @@ fn parse_line(line: &str, state: &mut ParseState) -> Option<Line> {
     }
 
     let (elements, alignment) = parse_elements_with_escape(line, state, pre_escape);
+    if elements.is_empty() && !line.is_empty() {
+        return None;
+    }
     Some(Line {
         kind: LineKind::Normal,
         indent_depth: state.depth,
@@ -1201,8 +1204,7 @@ This is `!NomadNet`!.
     #[test]
     fn test_alignment_without_text() {
         let doc = parse("`c");
-        assert_eq!(doc.lines[0].alignment, Alignment::Left);
-        assert!(doc.lines[0].elements.is_empty());
+        assert_eq!(doc.lines.len(), 0, "format-only lines produce no output");
     }
 
     #[test]
@@ -1456,7 +1458,8 @@ This is `!NomadNet`!.
     #[test]
     fn test_divider_inherits_alignment() {
         let doc = parse("`c\n-");
-        assert_eq!(doc.lines[1].alignment, Alignment::Center);
+        assert_eq!(doc.lines.len(), 1, "format-only line produces no output");
+        assert_eq!(doc.lines[0].alignment, Alignment::Center);
     }
 
     #[test]
@@ -1707,10 +1710,30 @@ fn test_alignment_persists_to_link_lines() {
 #[test]
 fn test_alignment_persists_through_format_only_lines() {
     let doc = parse("`F8ff`B222`c\n\n`[Link`/a]");
-    assert_eq!(doc.lines.len(), 3);
+    assert_eq!(doc.lines.len(), 2, "format-only line produces no output");
     assert_eq!(
-        doc.lines[2].alignment,
+        doc.lines[1].alignment,
         Alignment::Center,
         "link after format-only line"
+    );
+}
+
+#[test]
+fn test_format_only_line_produces_no_output() {
+    let doc = parse("`FFC0\ntext\n`F0C3\nmore");
+    assert_eq!(
+        doc.lines.len(),
+        2,
+        "format-only lines should not produce output lines"
+    );
+    assert_eq!(
+        doc.lines[0].elements.len(),
+        1,
+        "first line should have text"
+    );
+    assert_eq!(
+        doc.lines[1].elements.len(),
+        1,
+        "second line should have text"
     );
 }

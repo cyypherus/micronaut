@@ -627,6 +627,7 @@ dependencies = [
  "notify",
  "ratatui",
  "tui-input",
+ "unicode-segmentation",
  "unicode-width",
  "winnow",
 ]

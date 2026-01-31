@@ -2,9 +2,35 @@ use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
 use ratatui::text::{Line as RatLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use std::collections::HashMap;
-use unicode_width::UnicodeWidthStr;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthChar;
 
 use crate::micronaut::ast::*;
+
+fn display_width(s: &str) -> usize {
+    s.graphemes(true).map(grapheme_width).sum()
+}
+
+fn grapheme_width(g: &str) -> usize {
+    let mut chars = g.chars();
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return 0,
+    };
+    if chars.next().is_some() || is_emoji_char(first) {
+        2
+    } else {
+        UnicodeWidthChar::width(first).unwrap_or(0)
+    }
+}
+
+fn is_emoji_char(c: char) -> bool {
+    let cp = c as u32;
+    matches!(
+        cp,
+        0x1F300..=0x1F9FF | 0x2600..=0x26FF | 0x2700..=0x27BF | 0x1FA00..=0x1FAFF
+    )
+}
 use crate::micronaut::browser::{RenderOutput, Renderer};
 use crate::micronaut::parser::parse;
 use crate::micronaut::types::{FormState, Hitbox, Interactable};
@@ -323,7 +349,7 @@ fn render_normal_with_hitboxes(
         }
     }
 
-    let total_content_width: usize = wrapped_spans.iter().map(|ws| ws.text.width()).sum();
+    let total_content_width: usize = wrapped_spans.iter().map(|ws| display_width(&ws.text)).sum();
     let left_pad = compute_left_pad(line.alignment, content_width, total_content_width);
 
     let mut lines: Vec<RatLine<'static>> = Vec::new();
@@ -338,10 +364,10 @@ fn render_normal_with_hitboxes(
     }
 
     for ws in wrapped_spans {
-        let chars: Vec<char> = ws.text.chars().collect();
-        let mut char_idx = 0;
+        let graphemes: Vec<&str> = ws.text.graphemes(true).collect();
+        let mut grapheme_idx = 0;
 
-        while char_idx < chars.len() {
+        while grapheme_idx < graphemes.len() {
             let remaining_width = content_width.saturating_sub(current_col);
 
             if remaining_width == 0 {
@@ -354,8 +380,8 @@ fn render_normal_with_hitboxes(
                 continue;
             }
 
-            let (chunk, chunk_width) = take_by_width(&chars[char_idx..], remaining_width);
-            let chars_taken = chunk.chars().count();
+            let (chunk, chunk_width, graphemes_taken) =
+                take_graphemes_by_width(&graphemes[grapheme_idx..], remaining_width);
 
             if let Some((idx, ref interactable)) = ws.interactable {
                 hitboxes.push(Hitbox {
@@ -369,7 +395,7 @@ fn render_normal_with_hitboxes(
 
             current_line_spans.push(Span::styled(chunk, ws.style));
             current_col += chunk_width;
-            char_idx += chars_taken;
+            grapheme_idx += graphemes_taken;
         }
     }
 
@@ -440,19 +466,20 @@ fn collect_text(elements: &[Element]) -> String {
         .collect()
 }
 
-fn take_by_width(chars: &[char], max_width: usize) -> (String, usize) {
-    use unicode_width::UnicodeWidthChar;
+fn take_graphemes_by_width(graphemes: &[&str], max_width: usize) -> (String, usize, usize) {
     let mut result = String::new();
     let mut width = 0;
-    for &ch in chars {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
+    let mut count = 0;
+    for &g in graphemes {
+        let g_width = grapheme_width(g);
+        if width + g_width > max_width {
             break;
         }
-        result.push(ch);
-        width += ch_width;
+        result.push_str(g);
+        width += g_width;
+        count += 1;
     }
-    (result, width)
+    (result, width, count)
 }
 
 fn compute_left_pad(alignment: Alignment, available: usize, content: usize) -> usize {
@@ -468,7 +495,7 @@ fn compute_left_pad(alignment: Alignment, available: usize, content: usize) -> u
 }
 
 fn pad_to_width(text: &str, width: usize, alignment: Alignment) -> String {
-    let text_width = text.width();
+    let text_width = display_width(text);
     if text_width >= width {
         return text.to_string();
     }
