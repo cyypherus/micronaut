@@ -384,6 +384,15 @@ fn parse_backtick_sequence<'a>(input: &mut Stream<'a>) -> ModalResult<Option<Ele
 }
 
 fn parse_color<'a>(input: &mut Stream<'a>) -> ModalResult<Color> {
+    if input.input.starts_with('T') && input.input.chars().take(7).count() == 7 {
+        let hex: &str = preceded('T', take(6usize)).parse_next(input)?;
+        let value = u32::from_str_radix(hex, 16).unwrap_or(0);
+        return Ok(Color {
+            r: (value >> 16) as u8,
+            g: (value >> 8) as u8,
+            b: value as u8,
+        });
+    }
     let hex: &str = take(3usize).parse_next(input)?;
 
     if let Some(gray) = hex.strip_prefix('g') {
@@ -1736,4 +1745,16 @@ fn test_format_only_line_produces_no_output() {
         1,
         "second line should have text"
     );
+}
+
+#[test]
+fn true_color_codes_do_not_leak_into_text() {
+    let document = parse("`FT12ab34`BT5678cdcolor`f`b reset");
+    let [Element::Text(colored), Element::Text(reset)] = document.lines[0].elements.as_slice()
+    else { panic!("Expected colored and reset text") };
+    assert_eq!(colored.text, "color");
+    assert_eq!(colored.style.fg, Some(Color { r: 0x12, g: 0xab, b: 0x34 }));
+    assert_eq!(colored.style.bg, Some(Color { r: 0x56, g: 0x78, b: 0xcd }));
+    assert_eq!(reset.text, " reset");
+    assert_eq!(reset.style, Style::default());
 }
